@@ -31,11 +31,13 @@ async def start_dashboard():
     server = uvicorn.Server(config)
 
     async def _serve():
-        await server.serve()
+        try:
+            await server.serve()
+        except KeyboardInterrupt:
+            pass
 
     task = asyncio.ensure_future(_serve())
 
-    # 等待关闭信号
     await shutdown_manager.event.wait()
     logger.info("Dashboard shutting down...")
     server.should_exit = True
@@ -62,7 +64,9 @@ async def start_trade_engine():
 
 async def start_full():
     """同时启动 Dashboard 和 Trade Engine"""
-    logger.info("Starting full mode (Dashboard + Trade Engine)...")
+    logger.info("=" * 50)
+    logger.info("Starting FULL mode: Dashboard + Trade Engine")
+    logger.info("=" * 50)
     await asyncio.gather(
         start_dashboard(),
         start_trade_engine(),

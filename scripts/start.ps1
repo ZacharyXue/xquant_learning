@@ -118,7 +118,7 @@ try {
     if ($backendProc) {
         Write-Host "Shutting down backend..." -ForegroundColor Yellow
         try {
-            Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/shutdown" -Method POST -TimeoutSec 5 -ErrorAction SilentlyContinue | Out-Null
+            Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8000/api/shutdown" -Method POST -TimeoutSec 5 -ErrorAction SilentlyContinue | Out-Null
             Start-Sleep -Seconds 3
         } catch {
             # Shutdown endpoint may not exist yet
