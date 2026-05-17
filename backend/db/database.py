@@ -22,6 +22,10 @@ def get_engine():
             echo=False,
             poolclass=NullPool,
             pool_pre_ping=True,
+            connect_args={
+                "timeout": 10,
+                "command_timeout": 10,
+            },
         )
     return _engine
 
@@ -41,15 +45,34 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 async def get_session() -> AsyncSession:
     """获取数据库 session (FastAPI 依赖注入用)"""
     factory = get_session_factory()
-    async with factory() as session:
-        try:
+    try:
+        async with factory() as session:
             yield session
             await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
+    except Exception:
+        await session.rollback()
+        raise
+    finally:
+        await session.close()
+
+
+async def get_session_safe() -> AsyncSession:
+    """安全版 session - DB 不可用时返回 None"""
+    factory = get_session_factory()
+    try:
+        async with factory() as session:
+            yield session
+            await session.commit()
+    except Exception as e:
+        from backend.core.logging import get_logger
+        get_logger("db").warning(f"DB session unavailable: {e}")
+        yield None
+        return
+    finally:
+        try:
             await session.close()
+        except Exception:
+            pass
 
 
 async def init_db() -> None:

@@ -1,5 +1,6 @@
 """FastAPI 应用工厂"""
 
+import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -21,14 +22,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(f"Starting {settings.app.host}:{settings.app.port}")
 
     try:
-        await init_db()
+        await asyncio.wait_for(init_db(), timeout=5.0)
         logger.info("Database initialized")
+    except asyncio.TimeoutError:
+        logger.warning("Database init timed out (server may be offline)")
     except Exception as e:
-        logger.warning(f"Database init failed (may be offline): {e}")
+        logger.warning(f"Database init skipped: {e}")
 
     yield
 
-    await close_db()
+    try:
+        await close_db()
+    except Exception:
+        pass
     logger.info("Shutdown complete")
 
 
