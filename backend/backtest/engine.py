@@ -94,9 +94,8 @@ class BacktestEngine:
         buy_signals = []  # 买入信号
 
         param = strategy.params
-        days = param.get("investment_days", ["周三"])
-        weekday_map = {"周一": 0, "周二": 1, "周三": 2, "周四": 3, "周五": 4,
-                       "Monday": 0, "Tuesday": 1, "Wednesday": 2, "Thursday": 3, "Friday": 4}
+        days = param.get("investment_days", ["Wednesday"])
+        from backend.core.trading_calendar import _WEEKDAY_MAP as weekday_map
 
         for i, row in df.iterrows():
             date_str = str(row["time"])
