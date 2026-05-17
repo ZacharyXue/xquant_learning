@@ -1,208 +1,173 @@
-# xtquant 股票量化交易系统
+# xtquant 量化交易系统
 
-基于 **xtquant** (迅投量化交易平台) 的股票自动交易系统，包含策略执行、交易执行和回测功能。
+基于 **xtquant**（迅投量化交易平台）的股票自动交易系统。交易与决策分离，Web Dashboard 可视化，支持真实/模拟双模式切换。
+
+---
+
+## 当前功能
+
+| 模块 | 功能 | 状态 |
+|------|------|------|
+| 交易执行 | 真实交易 (xtquant/QMT) + 模拟交易 (虚拟账户) | ✅ |
+| 费率模型 | 佣金万2.5 + 印花税千1 + 过户费万0.2 + 滑点千1 | ✅ |
+| 策略引擎 | bonus_stocks 红利ETF定投 (RSI + MA乖离率 + 开盘跳空) | ✅ |
+| 风控 | 仓位上限 / 资金管理 / 下单频率限制 | ✅ |
+| 回测引擎 | xtquant 真实数据 + 网格搜索参数优化 + 绩效指标 | ✅ |
+| 数据持久化 | PostgreSQL 16 (8 张表，含交易/持仓/信号/回测) | ✅ |
+| Web Dashboard | 总览 / 策略管理 / 交易记录 / 回测中心 / 系统设置 | ✅ |
+| gRPC 通信 | 11 个 RPC + 行情 streaming，跨平台策略引擎 | ✅ |
+
+---
 
 ## 系统架构
 
 ```
-┌─────────────────────┐     gRPC      ┌─────────────────────┐
-│  策略执行器          │ ────────────│  交易执行器          │
-│  (strategy_executor)│              │  (trade_executor)    │
-└─────────────────────┘              └─────────────────────┘
-                         │
-                         ▼
-          ┌─────────────────────────────┐
-          │  前端回测系统 (FastAPI)       │
-          │  http://localhost:8000          │
-          └─────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│              Web Dashboard (React + AntD)             │
+│               :5173  ← Vite dev server                │
+└──────────────────────┬───────────────────────────────┘
+                       │ HTTP / WebSocket
+┌──────────────────────▼───────────────────────────────┐
+│           Backend API Server (FastAPI :8000)          │
+│  ┌──────────────────┐  ┌────────────────────────────┐ │
+│  │  策略引擎          │  │  回测引擎                  │ │
+│  │  - 策略调度        │  │  - 历史数据(xtquant)      │ │
+│  │  - 信号生成        │  │  - 参数优化(网格搜索)     │ │
+│  │  - 风控检查        │  │  - 绩效指标(夏普/回撤)    │ │
+│  └──────────────────┘  └────────────────────────────┘ │
+│  ┌──────────────────────────────────────────────────┐ │
+│  │  数据层 (SQLAlchemy 2.0 + PostgreSQL)             │ │
+│  └──────────────────────────────────────────────────┘ │
+└──────────────────────┬───────────────────────────────┘
+                       │ gRPC (streaming)
+┌──────────────────────▼───────────────────────────────┐
+│           Trade Engine (仅 Windows)                   │
+│  ┌────────────────────┐  ┌──────────────────────────┐ │
+│  │  RealTradeExecutor  │  │  SimTradeExecutor        │ │
+│  │  xtquant → QMT      │  │  虚拟账户 + 行情撮合      │ │
+│  └────────────────────┘  └──────────────────────────┘ │
+└──────────────────────────────────────────────────────┘
 ```
 
-## 快速开始
+---
 
-### 安装依赖
+## 启动方式
 
-```bash
-pip install -r requirements.txt
+### 前置条件
+
+- Python 3.11 (64-bit)
+- Docker Desktop（运行 PostgreSQL）
+- Node.js v22+（前端开发）
+- QMT 客户端（仅真实交易需要，模拟交易不需要）
+
+### 一键启动（Windows）
+
+```powershell
+# 在项目根目录执行
+.\scripts\start.ps1
 ```
 
-### 启动交易系统 (需要 QMT 运行)
+此脚本会：
+1. 检查并启动 PostgreSQL（Docker）
+2. 初始化数据库表结构
+3. 启动 FastAPI 后端（端口 8000）
+4. 启动前端开发服务器（端口 5173）
 
-```bash
-# 终端1: 启动交易执行器 (服务端)
-python -m src.trade_executor_grpc --config config/stock_config.yaml
+### 分步启动
 
-# 终端2: 启动策略执行器 (客户端)
-python -m src.strategy_executor_grpc --strategy bonus_stocks
+```powershell
+# 1. 启动 PostgreSQL
+docker compose -f docker/docker-compose.yml up -d postgres
+
+# 2. 启动后端（终端 1）
+.venv\Scripts\python.exe -m backend.main
+
+# 3. 启动前端（终端 2）
+cd frontend
+npm run dev
 ```
 
-### 启动回测前端
+访问：
+- Dashboard: http://localhost:5173
+- API 文档: http://localhost:8000/docs
+- 健康检查: http://localhost:8000/api/health
 
-```bash
-python frontend/backend.py
-# 访问 http://localhost:8000
+### 仅启动 Trade Engine（Windows 真实交易）
+
+```powershell
+.venv\Scripts\python.exe -m backend.main --trade
 ```
 
-### 命令行回测
+### 完整启动（Dashboard + Trade Engine）
 
-```bash
-# 红利ETF定投策略
-python -m src.backtest.backtest_engine -s bonus_stocks -d 3m
+```powershell
+.venv\Scripts\python.exe -m backend.main --full
 ```
 
-## 项目结构
+---
 
-```
-├── config/                     # 配置文件
-│   ├── stock_config.yaml       # 交易配置
-│   └── bonus_stocks.json       # 策略参数
-│
-├── src/                       # 源代码
-│   ├── trade/                 # 交易功能
-│   │   ├── trader.py          # xtquant 封装
-│   │   ├── grpc_trade_server.py
-│   │   └── grpc_trade_client.py
-│   │
-│   ├── trade_grpc/            # gRPC 协议
-│   │
-│   ├── strategies/            # 交易策略
-│   │   ├── bonus_stocks.py   # 红利ETF定投
-│   │   ├── buy_on_dips.py    # 跌后买入
-│   │   └── strategy_utils.py   # 工具函数
-│   │
-│   ├── backtest/              # 回测系统
-│   │   ├── history_data.py
-│   │   └── backtest_engine.py
-│   │
-│   ├── utils/                # 工具
-│   │   ├── logger.py
-│   │   └── config.py
-│   │
-│   ├── trade_db.py           # 交易记录数据库
-│   │
-│   ├── trade_executor_grpc.py
-│   └── strategy_executor_grpc.py
-│
-├── frontend/                 # 前端回测系统
-│   ├── backend.py            # FastAPI 后端
-│   ├── static/               # 静态文件
-│   └── data/                 # 回测结果数据
-│
-├── data/                     # 数据目录
-│   └── trades.db             # 交易记录数据库
-│
-├── README.md                 # 本文件
-├── CLAUDE.md                 # Claude Code 指导
-└── requirements.txt          # 依赖
-```
+## 技术栈
 
-## 配置说明
+| 层 | 技术 | 版本 |
+|----|------|------|
+| 后端框架 | FastAPI + uvicorn | 0.136 |
+| 数据库 ORM | SQLAlchemy 2.0 (async) + asyncpg | 2.0.49 |
+| 迁移工具 | Alembic | 1.18 |
+| gRPC | grpcio + protobuf | 1.80 |
+| 交易 SDK | xtquant (QMT) | 250516 |
+| 前端框架 | React + TypeScript | 18 |
+| UI 组件 | Ant Design 5 | 5.15 |
+| 图表 | Recharts | 3.8 |
+| 构建工具 | Vite | 5.4 |
 
-### stock_config.yaml
+---
 
-```yaml
-trading:
-  max_position_per_stock: 10000
-  initial_capital: 100000
-  check_interval: 60
+## 数据库
 
-strategy:
-  bonus_stocks:
-    stocks: []
-```
+8 张核心表（PostgreSQL 16）：
 
-### bonus_stocks.json
+| 表名 | 用途 |
+|------|------|
+| `strategies` | 策略定义与参数 |
+| `strategy_signals` | 策略信号日志 |
+| `trade_records` | 交易记录（含费率明细） |
+| `positions` | 持仓快照 |
+| `account_snapshots` | 账户资金快照 |
+| `backtest_runs` | 回测运行记录 |
+| `backtest_results` | 回测绩效指标 |
+| `system_configs` | 系统配置 KV |
 
-```json
-{
-    "investment": {
-        "days": ["周三"],
-        "base_volume": 500,
-        "lot_size": 100
-    },
-    "etfs": [
-        {"code": "515650.SH", "name": "消费50ETF"},
-        {"code": "513970.SH", "name": "恒生消费ETF"}
-    ],
-    "params": {
-        "rsi_oversold": 30,
-        "rsi_overbought": 70,
-        "bias_threshold": 10
-    }
-}
-```
+数据持久化到 `docker/pgdata/` 目录，删除 Docker 镜像不丢数据。
 
-## 交易策略
+---
 
-### bonus_stocks (红利ETF定投)
+## 费率模型
 
-- **触发时间**: 每周三
-- **指标**: RSI(14), 250日均线, 乖离率
-- **买入逻辑**:
-  - RSI > 70: 不买 (超买)
-  - RSI < 30: +100份
-  - 乖离率 > 10%: 不买
-  - 乖离率 < -10%: +100份
+所有交易（真实/模拟/回测）均计算完整费用：
 
-### buy_on_dips (跌后买入) - 已禁用
+| 费用项 | 费率 | 说明 |
+|--------|------|------|
+| 佣金 | 0.025%（万2.5） | 最低 5 元 |
+| 印花税 | 0.1%（千1） | 仅卖出 |
+| 过户费 | 0.002%（万0.2） | - |
+| 滑点 | 0.1%（千1） | 买入上浮、卖出下浮 |
 
-当前只运行 `bonus_stocks` 策略。
+可在 Dashboard → 设置中实时调整。
 
-## 回测系统
+---
 
-### 命令行回测
+## 模拟交易
 
-```bash
-python -m src.backtest.backtest_engine -s bonus_stocks -d 3m
-```
+无需 QMT 客户端即可完整验证策略逻辑：
 
-参数:
-- `-s/--strategy`: 策略名称 (默认 buy_on_dips)
-- `-d/--duration`: 回测时长 (1m/3m/6m/1y)
-- `--stock`: 股票代码 (默认 515650.SH)
+1. Dashboard → 设置 → 切换为"模拟交易"
+2. 策略引擎正常产生信号
+3. SimTradeExecutor 按当前价成交，计算全部费用
+4. 持仓/资金/交易记录全部写入数据库
 
-### 前端回测
+---
 
-```bash
-python frontend/backend.py
-# 访问 http://localhost:8000
-```
+## 相关文档
 
-功能:
-- 选择策略和回测时长
-- 查看收益曲线图表
-- 查看交易记录
-- 参数优化
-
-## 交易记录
-
-数据库: `data/trades.db`
-
-```python
-from src.trade_db import record_buy, query_trades
-
-# 记录买入
-record_buy(
-    strategy="bonus_stocks",
-    stock_code="515650.SH",
-    volume=500,
-    price=1.235,
-    extra={"buy_reason": "RSI<30", "rsi": 25.5}
-)
-
-# 查询记录
-trades = query_trades(strategy="bonus_stocks")
-```
-
-字段:
-- trade_time: 交易时间
-- stock_code/name: 品种
-- volume: 数量
-- price: 价格
-- extra.buy_reason: 买入原因
-
-## 注意事项
-
-1. xtquant 需要 QMT 客户端运行
-2. 虚拟环境: `.venv`
-3. 交易时间: 9:30-14:55
-4. 14:50 后自动取消未成交订单
+- [AGENTS.md](AGENTS.md) — AI 编程助手工作指南（环境信息、常用命令、开发规范）
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 系统架构设计与实施计划
