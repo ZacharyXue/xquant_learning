@@ -22,7 +22,7 @@ logger = get_logger("strategy.bonus_stocks")
 
 
 DEFAULT_PARAMS = {
-    "investment_days": ["周三"],
+    "investment_days": ["Wednesday"],
     "base_volume": 500,
     "lot_size": 100,
     "rsi_period": 14,
