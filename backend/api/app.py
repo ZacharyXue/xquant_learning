@@ -75,6 +75,13 @@ def create_app() -> FastAPI:
     async def health():
         return {"status": "ok", "version": "0.1.0"}
 
+    # 优雅关闭
+    @app.post("/api/shutdown")
+    async def shutdown():
+        from backend.core.shutdown import shutdown_manager
+        asyncio.ensure_future(shutdown_manager.trigger())
+        return {"status": "shutting_down"}
+
     return app
 
 

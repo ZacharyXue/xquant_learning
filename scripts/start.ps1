@@ -31,6 +31,7 @@ param(
 )
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
+$OriginalDir = Get-Location
 Set-Location $ProjectRoot
 $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 
@@ -42,7 +43,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "[1/3] PostgreSQL..." -ForegroundColor Yellow
 $pgRunning = docker ps --filter "name=xtquant_postgres" --format "{{.Names}}" 2>$null
 if (-not $pgRunning) {
-    docker compose -f "$ProjectRoot\docker\docker-compose.yml" up -d postgres 2>&1 | Out-Null
+    docker compose -f (Join-Path $ProjectRoot "docker\docker-compose.yml") up -d postgres 2>&1 | Out-Null
     Start-Sleep -Seconds 5
     Write-Host "  PostgreSQL started" -ForegroundColor Green
 } else {
@@ -52,7 +53,7 @@ if (-not $pgRunning) {
 # ---- Database init ----
 Write-Host "[2/3] Database..." -ForegroundColor Yellow
 try {
-    & $VenvPython "$ProjectRoot\scripts\setup_db.py" 2>&1 | Out-Null
+    & $VenvPython (Join-Path $ProjectRoot "scripts\setup_db.py") 2>&1 | Out-Null
     Write-Host "  Database ready" -ForegroundColor Green
 } catch {
     Write-Host "  Database init skipped" -ForegroundColor DarkYellow
@@ -62,6 +63,7 @@ try {
 if ($Trade) {
     Write-Host "[3/3] Trade Engine starting..." -ForegroundColor Yellow
     & $VenvPython -m backend.main --trade
+    Set-Location $OriginalDir
     return
 }
 
@@ -69,13 +71,18 @@ if ($Backend) {
     Write-Host "[3/3] Backend API: http://127.0.0.1:8000" -ForegroundColor Yellow
     Write-Host "  Docs: http://localhost:8000/docs" -ForegroundColor Gray
     & $VenvPython -m backend.main
+    Set-Location $OriginalDir
     return
 }
 
 if ($Frontend) {
     Write-Host "[3/3] Frontend: http://localhost:5173" -ForegroundColor Yellow
-    Set-Location "$ProjectRoot\frontend"
-    npm run dev
+    Set-Location (Join-Path $ProjectRoot "frontend")
+    try {
+        npm run dev
+    } finally {
+        Set-Location $OriginalDir
+    }
     return
 }
 
@@ -86,14 +93,33 @@ Write-Host "  Frontend: http://localhost:5173" -ForegroundColor White
 Write-Host "  Docs:     http://localhost:8000/docs" -ForegroundColor White
 Write-Host ""
 
-# Start backend in background
-$backendProc = Start-Process -FilePath $VenvPython -ArgumentList "-m","backend.main" -NoNewWindow -PassThru
-Start-Sleep -Seconds 6
+$backendProc = $null
 
-# Start frontend in foreground
-Set-Location "$ProjectRoot\frontend"
-npm run dev
+try {
+    # Start backend in background
+    $backendProc = Start-Process -FilePath $VenvPython -ArgumentList "-m","backend.main" -NoNewWindow -PassThru
+    Start-Sleep -Seconds 6
 
-# Frontend stopped -> clean up backend
-Write-Host "Shutting down backend..." -ForegroundColor Yellow
-Stop-Process -Id $backendProc.Id -Force -ErrorAction SilentlyContinue
+    # Start frontend in foreground
+    Set-Location (Join-Path $ProjectRoot "frontend")
+    npm run dev
+} finally {
+    # Restore original working directory
+    Set-Location $OriginalDir
+
+    # Graceful shutdown: request backend to stop via API, then kill if needed
+    if ($backendProc) {
+        Write-Host "Shutting down backend..." -ForegroundColor Yellow
+        try {
+            Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/shutdown" -Method POST -TimeoutSec 5 -ErrorAction SilentlyContinue | Out-Null
+            Start-Sleep -Seconds 3
+        } catch {
+            # Shutdown endpoint may not exist yet
+        }
+        # Ensure process is gone
+        if (-not $backendProc.HasExited) {
+            Stop-Process -Id $backendProc.Id -Force -ErrorAction SilentlyContinue
+        }
+        Write-Host "Backend stopped" -ForegroundColor Green
+    }
+}

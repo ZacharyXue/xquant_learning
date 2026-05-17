@@ -8,11 +8,13 @@ Usage:
 
 import argparse
 import asyncio
+import signal
 import sys
 import uvicorn
 
 from backend.core.config import settings
 from backend.core.logging import setup_logging, get_logger
+from backend.core.shutdown import shutdown_manager
 
 logger = get_logger("main")
 
@@ -27,17 +29,34 @@ async def start_dashboard():
         log_level="info",
     )
     server = uvicorn.Server(config)
-    await server.serve()
+
+    async def _serve():
+        await server.serve()
+
+    task = asyncio.ensure_future(_serve())
+
+    # 等待关闭信号
+    await shutdown_manager.event.wait()
+    logger.info("Dashboard shutting down...")
+    server.should_exit = True
+    await task
 
 
 async def start_trade_engine():
     """启动 Trade Engine"""
-    logger.info("Trade Engine not yet implemented")
-    await asyncio.sleep(1)
+    from backend.trade.engine import TradeEngine
+
+    engine = TradeEngine()
+    try:
+        await engine.initialize()
+        await engine.run()
+    finally:
+        await engine.close()
 
 
 async def start_full():
     """同时启动 Dashboard 和 Trade Engine"""
+    logger.info("Starting full mode (Dashboard + Trade Engine)...")
     await asyncio.gather(
         start_dashboard(),
         start_trade_engine(),
@@ -52,12 +71,25 @@ def main():
 
     setup_logging()
 
-    if args.trade:
-        asyncio.run(start_trade_engine())
-    elif args.full and sys.platform == "win32":
-        asyncio.run(start_full())
-    else:
-        asyncio.run(start_dashboard())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    shutdown_manager.setup_signal_handlers(loop)
+
+    try:
+        if args.trade:
+            loop.run_until_complete(start_trade_engine())
+        elif args.full and sys.platform == "win32":
+            loop.run_until_complete(start_full())
+        else:
+            loop.run_until_complete(start_dashboard())
+    except KeyboardInterrupt:
+        pass
+    finally:
+        pending = asyncio.all_tasks(loop)
+        if pending:
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        loop.close()
+        logger.info("Process exit")
 
 
 if __name__ == "__main__":
