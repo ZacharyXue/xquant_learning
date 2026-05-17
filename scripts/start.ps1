@@ -17,29 +17,63 @@
 .PARAMETER Full
     Start Dashboard + Trade Engine + Frontend (requires QMT running)
 
+.PARAMETER AccountId
+    QMT trading account ID (required for --Trade and --Full)
+
 .EXAMPLE
     .\scripts\start.ps1
     .\scripts\start.ps1 --Backend
-    .\scripts\start.ps1 --Trade
+    .\scripts\start.ps1 --Full -AccountId "1234567890"
 #>
 
 param(
     [switch]$Backend,
     [switch]$Frontend,
     [switch]$Trade,
-    [switch]$Full
+    [switch]$Full,
+    [string]$AccountId = ""
 )
 
 # --Full implies backend with Trade Engine
 $BackendArgs = "-m", "backend.main"
-if ($Full) {
+if ($Full -or $Trade) {
     $BackendArgs = "-m", "backend.main", "--full"
+}
+if ($Trade) {
+    $BackendArgs = "-m", "backend.main", "--trade"
 }
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $OriginalDir = Get-Location
 Set-Location $ProjectRoot
 $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+
+# ---- QMT Environment ----
+$qmtPath = "D:\国金证券QMT交易端"
+if (-not (Test-Path $qmtPath)) {
+    Write-Host "WARNING: QMT not found at $qmtPath" -ForegroundColor Red
+}
+$env:XTQUANT_QMT_PATH = $qmtPath
+
+if ($AccountId) {
+    $env:XTQUANT_ACCOUNT_ID = $AccountId
+} elseif (-not $env:XTQUANT_ACCOUNT_ID) {
+    if ($Trade -or $Full) {
+        Write-Host "WARNING: XTQUANT_ACCOUNT_ID not set. Trade Engine will fail." -ForegroundColor Yellow
+        Write-Host "  Usage: .\scripts\start.ps1 --Full -AccountId 'your_account_id'" -ForegroundColor Gray
+    }
+}
+
+# Check QMT client is running
+$qmtRunning = Get-Process -Name "XtItClient","XtMiniQmt" -ErrorAction SilentlyContinue
+if ($Trade -or $Full) {
+    if (-not $qmtRunning) {
+        Write-Host "ERROR: QMT client not running! Please start QMT and login first." -ForegroundColor Red
+        Set-Location $OriginalDir
+        return
+    }
+    Write-Host "QMT client detected" -ForegroundColor Green
+}
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  xtquant Trading System" -ForegroundColor Green
@@ -68,7 +102,7 @@ try {
 # ---- Start services ----
 if ($Trade) {
     Write-Host "[3/3] Trade Engine starting..." -ForegroundColor Yellow
-    & $VenvPython -m backend.main --trade
+    & $VenvPython @BackendArgs
     Set-Location $OriginalDir
     return
 }
