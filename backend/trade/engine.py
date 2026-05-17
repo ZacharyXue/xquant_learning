@@ -187,23 +187,28 @@ class TradeEngine:
     async def run(self) -> None:
         logger.info("TradeEngine starting...")
 
+        # 初始同步：立即将 QMT 账户/持仓写入 DB
+        await self._state_sync.sync()
+        logger.info("Initial state synced to DB")
+
+        # StateSync 持续运行
+        sync_task = asyncio.ensure_future(self._state_sync.run())
+        self._tasks.append(sync_task)
+
         # 等待开盘
         await self._wait_for_market_open()
 
-        # 启动子组件
+        # 启动交易子组件
         tasks = [
             asyncio.ensure_future(self._quote_pump.run()),
             asyncio.ensure_future(self._tracker.run()),
             asyncio.ensure_future(self._session_loop()),
         ]
-        self._tasks = tasks
+        self._tasks.extend(tasks)
 
         # 设置 SignalBus handler -> OrderBroker
         self._signal_bus.add_handler(self._broker.handle_signal)
         asyncio.ensure_future(self._broker.run())
-
-        # 状态同步 (在 TRADING 状态才开始)
-        # 由 _session_loop 管理
 
         try:
             await asyncio.gather(*tasks)
@@ -213,7 +218,6 @@ class TradeEngine:
             await self.close()
 
     async def _session_loop(self) -> None:
-        sync_task: Optional[asyncio.Task] = None
         self._state = SessionState.PRE_MARKET
         logger.info("Entered PRE_MARKET")
 
@@ -231,8 +235,6 @@ class TradeEngine:
                 if t >= time(9, 30):
                     self._state = SessionState.TRADING
                     logger.info("Entered TRADING (9:30)")
-                    if sync_task is None:
-                        sync_task = asyncio.ensure_future(self._state_sync.run())
 
             elif self._state == SessionState.TRADING:
                 if t >= time(11, 30) and t < time(13, 0):
@@ -253,7 +255,7 @@ class TradeEngine:
                 if t >= time(15, 0):
                     self._state = SessionState.POST_CLOSE
                     logger.info("Entered POST_CLOSE (15:00)")
-                    await self._final_sync(sync_task)
+                    await self._state_sync.sync()
                     self._state = SessionState.CLOSED
                     logger.info("Session closed, waiting for next trading day")
                     await asyncio.sleep(3600)
@@ -266,16 +268,27 @@ class TradeEngine:
             await asyncio.sleep(1)
 
     async def _wait_for_market_open(self) -> None:
-        logger.info("Waiting for market open (9:30)...")
+        logger.info("Waiting for pre-market window (8:50)...")
         while True:
             now = datetime.now()
             if now.weekday() >= 5:
-                await asyncio.sleep(60)
+                logger.debug("Weekend, sleeping 1h")
+                await asyncio.sleep(3600)
                 continue
-            if now.time() >= time(9, 15) or now.time() < time(9, 0):
-                logger.info(f"Market approaching, time={now.time()}")
-                break
-            await asyncio.sleep(10)
+            t = now.time()
+            if t >= time(8, 50):
+                logger.info(f"Pre-market window reached, time={t}")
+                return
+            # 计算到 8:50 还需等待的秒数
+            target_sec = 8 * 3600 + 50 * 60
+            current_sec = t.hour * 3600 + t.minute * 60 + t.second
+            if current_sec < target_sec:
+                wait = target_sec - current_sec
+            else:
+                wait = 24 * 3600 - current_sec + target_sec
+            wait = min(wait, 3600)
+            logger.debug(f"Waiting {wait:.0f}s until 8:50")
+            await asyncio.sleep(wait)
 
     async def _cancel_unfilled(self) -> None:
         if not self._executor:

@@ -201,15 +201,15 @@ class RealTradeExecutor(TradeExecutor):
             xt_positions = self._trader.query_stock_positions(self._account)
             positions = []
             for pos in xt_positions:
-                mv = pos.volume * pos.avg_price
+                mv = pos.volume * pos.open_price
                 positions.append(trade_pb2.Position(
                     stock_code=pos.stock_code,
                     stock_name=getattr(pos, "stock_name", ""),
                     volume=pos.volume,
                     available_volume=pos.can_use_volume,
-                    avg_cost=pos.avg_price,
+                    avg_cost=pos.open_price,
                     current_price=0.0,
-                    market_value=mv,
+                    market_value=pos.market_value,
                     profit_loss=0.0,
                     profit_loss_ratio=0.0,
                     trade_mode="real",

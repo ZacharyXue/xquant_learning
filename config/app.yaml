@@ -19,8 +19,8 @@ grpc:
   port: 50051
 
 trade:
-  qmt_path: ""
-  account_id: ""
+  qmt_path: "D:\\国金证券QMT交易端\\userdata_mini"
+  account_id: "8884731549"
   mode: real                  # real | sim
   max_position_per_stock: 10000
   initial_capital: 100000.0

@@ -49,7 +49,7 @@ Set-Location $ProjectRoot
 $VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 
 # ---- QMT Environment ----
-$qmtPath = "D:\国金证券QMT交易端"
+$qmtPath = "D:\国金证券QMT交易端\userdata_mini"
 if (-not (Test-Path $qmtPath)) {
     Write-Host "WARNING: QMT not found at $qmtPath" -ForegroundColor Red
 }
