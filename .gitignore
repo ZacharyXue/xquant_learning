@@ -1,0 +1,19 @@
+.venv
+.claude
+
+logs/*
+data/db/*
+
+*.pyc
+*.png
+
+*.db
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Config (包含账户信息)
+config/*.yaml
+config/stock_config.yaml
