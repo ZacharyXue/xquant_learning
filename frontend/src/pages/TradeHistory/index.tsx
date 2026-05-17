@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Card, Table, Tag, Select, Space, Typography, Input } from 'antd'
-import { SearchOutlined } from '@ant-design/icons'
+import { Card, Table, Tag, Select, Space, Typography } from 'antd'
 import { fetchTrades } from '../../api'
 import type { TradeRecord } from '../../types'
 

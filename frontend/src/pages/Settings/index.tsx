@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   Card, Form, InputNumber, Select, Button, Typography,
-  message, Divider, Switch, Space, Descriptions, Spin,
+  message, Switch, Space, Descriptions, Spin,
 } from 'antd'
 import {
   fetchFeeConfig, updateFeeConfig,

@@ -1,21 +1,17 @@
 import { useState, useEffect } from 'react'
 import {
-  Card, Form, Input, Select, Button, Statistic, Row, Col, Table,
-  Typography, message, Spin,
+  Card, Form, Input, Select, Button, Table,
+  Typography, message,
 } from 'antd'
 import { PlayCircleOutlined } from '@ant-design/icons'
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-} from 'recharts'
-import { runBacktest, fetchBacktestHistory, fetchBacktestResult, fetchStrategies } from '../../api'
-import type { BacktestResult, BacktestRun } from '../../types'
+import { runBacktest, fetchBacktestHistory, fetchStrategies } from '../../api'
+import type { BacktestRun } from '../../types'
 
-const { Title, Text } = Typography
+const { Title } = Typography
 
 export default function BacktestPage() {
   const [strategies, setStrategies] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<BacktestResult | null>(null)
   const [history, setHistory] = useState<BacktestRun[]>([])
 
   useEffect(() => {
@@ -67,32 +63,6 @@ export default function BacktestPage() {
           </Form.Item>
         </Form>
       </Card>
-
-      {result && (
-        <Card title="回测结果" style={{ marginTop: 16 }}>
-          <Row gutter={16}>
-            <Col span={4}><Statistic title="交易次数" value={result.total_trades} /></Col>
-            <Col span={4}><Statistic title="胜率" value={result.win_rate} precision={2} suffix="%" /></Col>
-            <Col span={4}><Statistic title="收益率" value={result.return_rate * 100} precision={2} suffix="%" /></Col>
-            <Col span={4}><Statistic title="年化收益" value={result.annualized_return * 100} precision={2} suffix="%" /></Col>
-            <Col span={4}><Statistic title="最大回撤" value={result.max_drawdown * 100} precision={2} suffix="%" /></Col>
-            <Col span={4}><Statistic title="夏普比率" value={result.sharpe_ratio} precision={2} /></Col>
-          </Row>
-
-          {result.equity_curve?.length > 0 && (
-            <ResponsiveContainer width="100%" height={300} style={{ marginTop: 24 }}>
-              <LineChart data={result.equity_curve}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="value" stroke="#1677ff" name="权益曲线" dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </Card>
-      )}
 
       <Card title="历史回测" style={{ marginTop: 16 }}>
         <Table

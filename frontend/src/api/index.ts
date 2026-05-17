@@ -1,5 +1,5 @@
 import type {
-  Strategy, TradeRecord, PaginatedTrades, DashboardData,
+  Strategy, PaginatedTrades, DashboardData,
   BacktestRequest, BacktestResult, BacktestRun,
   FeeConfig, SlippageConfig, TradingHoursConfig,
 } from '../types'

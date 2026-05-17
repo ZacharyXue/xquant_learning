@@ -3,7 +3,7 @@ import { Card, Switch, List, Typography, Tag, Descriptions, Spin } from 'antd'
 import { fetchStrategies, toggleStrategy } from '../../api'
 import type { Strategy } from '../../types'
 
-const { Title, Text, Paragraph } = Typography
+const { Title, Paragraph } = Typography
 
 export default function StrategyPage() {
   const [strategies, setStrategies] = useState<Strategy[]>([])
