@@ -24,7 +24,7 @@ class AppConfig:
 
 @dataclass
 class DatabaseConfig:
-    host: str = "localhost"
+    host: str = "127.0.0.1"
     port: int = 5432
     user: str = "postgres"
     password: str = "postgres"

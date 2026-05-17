@@ -45,10 +45,16 @@ async def start_dashboard():
 async def start_trade_engine():
     """启动 Trade Engine"""
     from backend.trade.engine import TradeEngine
+    from backend.api.websocket import get_ws_manager
 
     engine = TradeEngine()
+    engine.set_ws_manager(get_ws_manager())
+
     try:
-        await engine.initialize()
+        ok = await engine.initialize()
+        if not ok:
+            logger.error("TradeEngine initialization failed")
+            return
         await engine.run()
     finally:
         await engine.close()

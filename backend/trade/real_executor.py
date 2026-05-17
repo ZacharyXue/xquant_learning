@@ -10,6 +10,8 @@ import time
 from datetime import datetime
 from typing import AsyncIterator, Optional
 
+import backend.core.xtquant_setup  # noqa: F401
+
 from backend.core.config import settings
 from backend.core.logging import get_logger
 from backend.grpc import trade_pb2
@@ -61,11 +63,11 @@ class _TraderCallback(XtQuantTraderCallback):
 class RealTradeExecutor(TradeExecutor):
     """真实交易执行器 (通过 xtquant 连接 QMT)"""
 
-    def __init__(self, config: dict = None):
+    def __init__(self, config: dict = None, callback=None):
         super().__init__(config)
         self._trader: Optional[XtQuantTrader] = None
         self._account: Optional[StockAccount] = None
-        self._callback: Optional[_TraderCallback] = None
+        self._callback = callback
         self._orders: dict[str, any] = {}
         self._trades: list[any] = []
         self._cancel_timer_task: Optional[asyncio.Task] = None
@@ -85,7 +87,8 @@ class RealTradeExecutor(TradeExecutor):
         try:
             session_id = int(time.time())
             self._trader = XtQuantTrader(qmt_path, session_id)
-            self._callback = _TraderCallback(self)
+            if self._callback is None:
+                self._callback = _TraderCallback(self)
             self._trader.register_callback(self._callback)
             self._trader.start()
 

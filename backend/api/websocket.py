@@ -2,11 +2,17 @@
 WebSocket 实时推送
 
 推送行情数据、交易状态、策略信号等实时信息。
+支持的事件类型:
+  - state_sync: 账户/持仓定时同步
+  - new_order: 新订单
+  - order_update: 订单状态变更
+  - trade: 成交记录
+  - signal: 策略信号
 """
 
 import asyncio
 import json
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
 from backend.core.logging import get_logger
@@ -55,6 +61,10 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
+
+
+def get_ws_manager() -> ConnectionManager:
+    return manager
 
 
 async def websocket_endpoint(ws: WebSocket):
