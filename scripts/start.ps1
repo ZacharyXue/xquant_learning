@@ -15,7 +15,7 @@
     Start Trade Engine only (requires QMT running)
 
 .PARAMETER Full
-    Start backend + frontend (same as default)
+    Start Dashboard + Trade Engine + Frontend (requires QMT running)
 
 .EXAMPLE
     .\scripts\start.ps1
@@ -29,6 +29,12 @@ param(
     [switch]$Trade,
     [switch]$Full
 )
+
+# --Full implies backend with Trade Engine
+$BackendArgs = "-m", "backend.main"
+if ($Full) {
+    $BackendArgs = "-m", "backend.main", "--full"
+}
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $OriginalDir = Get-Location
@@ -87,7 +93,8 @@ if ($Frontend) {
 }
 
 # Default / --Full: start backend + frontend together
-Write-Host "[3/3] Starting backend + frontend..." -ForegroundColor Yellow
+$modeLabel = if ($Full) { "Dashboard + Trade Engine" } else { "Dashboard" }
+Write-Host "[3/3] Starting $modeLabel + frontend..." -ForegroundColor Yellow
 Write-Host "  Backend:  http://localhost:8000" -ForegroundColor White
 Write-Host "  Frontend: http://localhost:5173" -ForegroundColor White
 Write-Host "  Docs:     http://localhost:8000/docs" -ForegroundColor White
@@ -97,7 +104,7 @@ $backendProc = $null
 
 try {
     # Start backend in background
-    $backendProc = Start-Process -FilePath $VenvPython -ArgumentList "-m","backend.main" -NoNewWindow -PassThru
+    $backendProc = Start-Process -FilePath $VenvPython -ArgumentList $BackendArgs -NoNewWindow -PassThru
     Start-Sleep -Seconds 6
 
     # Start frontend in foreground
