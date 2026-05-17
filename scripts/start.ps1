@@ -1,16 +1,9 @@
-#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     xtquant trading system startup script (Windows)
 
 .DESCRIPTION
-    Auto-check PostgreSQL, init database, start backend and/or frontend.
-
-.PARAMETER Trade
-    Start Trade Engine only (requires QMT running)
-
-.PARAMETER Full
-    Start Dashboard + Trade Engine
+    Auto-check PostgreSQL, init database, start backend and frontend.
 
 .PARAMETER Backend
     Start backend API server only
@@ -18,17 +11,23 @@
 .PARAMETER Frontend
     Start frontend dev server only
 
+.PARAMETER Trade
+    Start Trade Engine only (requires QMT running)
+
+.PARAMETER Full
+    Start backend + frontend (same as default)
+
 .EXAMPLE
     .\scripts\start.ps1
     .\scripts\start.ps1 --Backend
-    .\scripts\start.ps1 --Full
+    .\scripts\start.ps1 --Trade
 #>
 
 param(
-    [switch]$Trade,
-    [switch]$Full,
     [switch]$Backend,
-    [switch]$Frontend
+    [switch]$Frontend,
+    [switch]$Trade,
+    [switch]$Full
 )
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
@@ -63,20 +62,38 @@ try {
 if ($Trade) {
     Write-Host "[3/3] Trade Engine starting..." -ForegroundColor Yellow
     & $VenvPython -m backend.main --trade
-} elseif ($Full) {
-    Write-Host "[3/3] Full system starting..." -ForegroundColor Yellow
-    & $VenvPython -m backend.main --full
-} elseif ($Backend) {
+    return
+}
+
+if ($Backend) {
     Write-Host "[3/3] Backend API: http://127.0.0.1:8000" -ForegroundColor Yellow
     Write-Host "  Docs: http://localhost:8000/docs" -ForegroundColor Gray
     & $VenvPython -m backend.main
-} elseif ($Frontend) {
+    return
+}
+
+if ($Frontend) {
     Write-Host "[3/3] Frontend: http://localhost:5173" -ForegroundColor Yellow
     Set-Location "$ProjectRoot\frontend"
     npm run dev
-} else {
-    Write-Host "[3/3] Backend: http://127.0.0.1:8000" -ForegroundColor Yellow
-    Write-Host "  Frontend: cd frontend; npm run dev" -ForegroundColor Gray
-    Write-Host "  Docs: http://localhost:8000/docs" -ForegroundColor Gray
-    & $VenvPython -m backend.main
+    return
 }
+
+# Default / --Full: start backend + frontend together
+Write-Host "[3/3] Starting backend + frontend..." -ForegroundColor Yellow
+Write-Host "  Backend:  http://localhost:8000" -ForegroundColor White
+Write-Host "  Frontend: http://localhost:5173" -ForegroundColor White
+Write-Host "  Docs:     http://localhost:8000/docs" -ForegroundColor White
+Write-Host ""
+
+# Start backend in background
+$backendProc = Start-Process -FilePath $VenvPython -ArgumentList "-m","backend.main" -NoNewWindow -PassThru
+Start-Sleep -Seconds 6
+
+# Start frontend in foreground
+Set-Location "$ProjectRoot\frontend"
+npm run dev
+
+# Frontend stopped -> clean up backend
+Write-Host "Shutting down backend..." -ForegroundColor Yellow
+Stop-Process -Id $backendProc.Id -Force -ErrorAction SilentlyContinue
