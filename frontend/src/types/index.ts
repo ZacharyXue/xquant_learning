@@ -1,63 +1,119 @@
 export interface Strategy {
-  id: string
   name: string
+  display_name: string
   description: string
+  enabled: boolean
+  config: Record<string, any>
 }
 
-export interface Duration {
-  id: string
-  name: string
+export interface TradeRecord {
+  id: number
+  strategy_name: string | null
+  stock_code: string
+  side: string
+  volume: number
+  order_price: number | null
+  filled_price: number | null
+  status: string
+  commission: number
+  stamp_tax: number
+  transfer_fee: number
+  slippage: number
+  amount: number | null
+  trade_mode: string
+  trade_time: string
+  created_at: string
+}
+
+export interface Position {
+  stock_code: string
+  stock_name: string
+  volume: number
+  avg_cost: number
+  current_price: number
+  market_value: number
+  profit_loss: number
+}
+
+export interface DashboardData {
+  total_asset: number
+  available_cash: number
+  market_value: number
+  total_profit_loss: number
+  positions: Position[]
+  recent_trades: {
+    id: number
+    strategy_name: string | null
+    stock_code: string
+    side: string
+    volume: number
+    status: string
+    amount: number
+    trade_time: string
+  }[]
+  active_strategies: string[]
+}
+
+export interface PaginatedTrades {
+  items: TradeRecord[]
+  total: number
+  page: number
+  page_size: number
 }
 
 export interface BacktestRequest {
-  strategy: string
+  strategy_name: string
   stock_code: string
-  duration: string
-}
-
-export interface BacktestResponse {
-  success: boolean
-  data?: BacktestResult
-  error?: string
-}
-
-export interface BuyRecord {
-  time: string
-  price: number
-  volume: number
-  cost: number
-  rsi?: number
-  bias?: number
+  start_date: string
+  end_date: string
+  params?: Record<string, any>
 }
 
 export interface BacktestResult {
-  strategy: string
-  stock_code: string
-  start_time: string
-  end_time: string
+  run_id: number
   total_trades: number
   profitable_trades: number
+  win_rate: number
   total_investment: number
   final_value: number
-  total_return: number
   return_rate: number
-  volatility: number
+  annualized_return: number
+  max_drawdown: number
   sharpe_ratio: number
-  annualized_return?: number
-  max_drawdown?: number
-  calmar_ratio?: number
-  win_rate?: number
-  buy_records: BuyRecord[]
-  prices: number[]
-  times: string[]
+  calmar_ratio: number
+  equity_curve: { date: string; value: number }[]
+  buy_signals: { date: string; price: number }[]
 }
 
-export interface HistoryRecord {
-  id: string
-  filename: string
-  strategy: string
+export interface BacktestRun {
+  id: number
+  strategy_name: string
   stock_code: string
-  created_at: string
-  total_trades: number
-  return_rate: number
+  start_date: string
+  end_date: string
+  status: string
+  started_at: string
+}
+
+export interface FeeConfig {
+  commission_rate: number
+  stamp_tax_rate: number
+  transfer_fee_rate: number
+  min_commission: number
+}
+
+export interface SlippageConfig {
+  rate: number
+  mode: string
+}
+
+export interface TradingHoursConfig {
+  start: string
+  end: string
+  cancel_unfilled_at: string
+}
+
+export interface WSMessage {
+  type: string
+  data: any
 }

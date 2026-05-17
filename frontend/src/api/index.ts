@@ -1,47 +1,105 @@
-import type { Strategy, Duration, BacktestRequest, BacktestResponse, BacktestResult, HistoryRecord } from '../types'
+import type {
+  Strategy, TradeRecord, PaginatedTrades, DashboardData,
+  BacktestRequest, BacktestResult, BacktestRun,
+  FeeConfig, SlippageConfig, TradingHoursConfig,
+} from '../types'
 
-const API_BASE = '/api'
+const API = '/api'
 
-export async function getStrategies(): Promise<Strategy[]> {
-  const res = await fetch(`${API_BASE}/strategies`)
-  const data = await res.json()
-  return data.strategies
+// ---- Dashboard ----
+export async function fetchDashboard(mode = 'real'): Promise<DashboardData> {
+  const res = await fetch(`${API}/dashboard?trade_mode=${mode}`)
+  return res.json()
 }
 
-export async function getDurations(): Promise<Duration[]> {
-  const res = await fetch(`${API_BASE}/durations`)
-  const data = await res.json()
-  return data.durations
+// ---- Strategy ----
+export async function fetchStrategies(): Promise<Strategy[]> {
+  const res = await fetch(`${API}/strategy`)
+  return res.json()
 }
 
-export async function runBacktest(request: BacktestRequest): Promise<BacktestResponse> {
-  const res = await fetch(`${API_BASE}/backtest`, {
+export async function toggleStrategy(name: string, enabled: boolean): Promise<void> {
+  await fetch(`${API}/strategy/toggle`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(request),
+    body: JSON.stringify({ name, enabled }),
+  })
+}
+
+// ---- Trade History ----
+export async function fetchTrades(params: {
+  strategy_name?: string
+  stock_code?: string
+  side?: string
+  status?: string
+  trade_mode?: string
+  page?: number
+  page_size?: number
+} = {}): Promise<PaginatedTrades> {
+  const qs = new URLSearchParams()
+  Object.entries(params).forEach(([k, v]) => { if (v !== undefined) qs.set(k, String(v)) })
+  const res = await fetch(`${API}/trade?${qs}`)
+  return res.json()
+}
+
+// ---- Backtest ----
+export async function runBacktest(req: BacktestRequest): Promise<any> {
+  const res = await fetch(`${API}/backtest/run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
   })
   return res.json()
 }
 
-export async function getBacktestData(strategy: string, stock: string): Promise<BacktestResult> {
-  const res = await fetch(`${API_BASE}/data/${strategy}/${stock}`)
-  if (!res.ok) {
-    const err = await res.json()
-    throw new Error(err.detail || '获取数据失败')
-  }
+export async function fetchBacktestHistory(limit = 20): Promise<BacktestRun[]> {
+  const res = await fetch(`${API}/backtest/history?limit=${limit}`)
   return res.json()
 }
 
-export async function getHistory(): Promise<HistoryRecord[]> {
-  const res = await fetch(`${API_BASE}/history`)
-  if (!res.ok) {
-    return []
-  }
+export async function fetchBacktestResult(runId: number): Promise<BacktestResult> {
+  const res = await fetch(`${API}/backtest/result/${runId}`)
+  return res.json()
+}
+
+// ---- Settings ----
+export async function fetchFeeConfig(): Promise<FeeConfig> {
+  const res = await fetch(`${API}/settings/fee`)
+  return res.json()
+}
+
+export async function updateFeeConfig(data: Partial<FeeConfig>): Promise<void> {
+  await fetch(`${API}/settings/fee`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function fetchSlippageConfig(): Promise<SlippageConfig> {
+  const res = await fetch(`${API}/settings/slippage`)
+  return res.json()
+}
+
+export async function updateSlippageConfig(data: Partial<SlippageConfig>): Promise<void> {
+  await fetch(`${API}/settings/slippage`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function fetchTradingHours(): Promise<TradingHoursConfig> {
+  const res = await fetch(`${API}/settings/trading-hours`)
+  return res.json()
+}
+
+export async function fetchTradeMode(): Promise<string> {
+  const res = await fetch(`${API}/settings/trade-mode`)
   const data = await res.json()
-  return data.history || []
+  return data.mode
 }
 
-export async function getConfig(): Promise<any> {
-  const res = await fetch(`${API_BASE}/config`)
-  return res.json()
+export async function updateTradeMode(mode: string): Promise<void> {
+  await fetch(`${API}/settings/trade-mode?mode=${mode}`, { method: 'PUT' })
 }
