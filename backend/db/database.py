@@ -83,6 +83,23 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
 
 
+async def seed_strategies(definitions: list[dict]) -> None:
+    """种子策略数据到 strategies 表 (幂等)"""
+    from backend.db.repository import upsert_strategy
+    factory = get_session_factory()
+    async with factory() as session:
+        for s in definitions:
+            await upsert_strategy(
+                session,
+                name=s["name"],
+                display_name=s.get("display_name", s["name"]),
+                description=s.get("description", ""),
+                config=s.get("config", {}),
+                enabled=s.get("enabled", False),
+            )
+        await session.commit()
+
+
 async def close_db() -> None:
     """关闭数据库连接"""
     global _engine

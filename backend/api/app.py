@@ -24,6 +24,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         await asyncio.wait_for(init_db(), timeout=5.0)
         logger.info("Database initialized")
+
+        from backend.db.database import seed_strategies
+        await seed_strategies(_DEFAULT_STRATEGIES)
+        logger.info("Strategies seeded")
     except asyncio.TimeoutError:
         logger.warning("Database init timed out (server may be offline)")
     except Exception as e:
@@ -36,6 +40,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         pass
     logger.info("Shutdown complete")
+
+
+_DEFAULT_STRATEGIES = [
+    {
+        "name": "bonus_stocks",
+        "display_name": "红利ETF定投",
+        "description": "每周三基于RSI和均线乖离率择时买入红利ETF",
+        "enabled": True,
+        "config": {
+            "investment_days": ["Wednesday"],
+            "base_volume": 500,
+            "lot_size": 100,
+            "rsi_period": 14,
+            "rsi_overbought": 70,
+            "rsi_oversold": 30,
+            "rsi_additional": 100,
+            "bias_ma_period": 250,
+            "bias_upper": 0.10,
+            "bias_lower": -0.10,
+            "bias_additional": 100,
+            "open_change_threshold": 0.01,
+        },
+    },
+]
 
 
 def create_app() -> FastAPI:

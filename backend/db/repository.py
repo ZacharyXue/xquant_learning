@@ -122,6 +122,32 @@ async def get_strategies(db: AsyncSession) -> list[Strategy]:
     return result.scalars().all()
 
 
+async def upsert_strategy(db: AsyncSession, name: str, **kwargs) -> Strategy:
+    q = select(Strategy).where(Strategy.name == name)
+    result = await db.execute(q)
+    row = result.scalar_one_or_none()
+    if row:
+        for k, v in kwargs.items():
+            setattr(row, k, v)
+        row.updated_at = datetime.now()
+    else:
+        row = Strategy(name=name, **kwargs)
+        db.add(row)
+    await db.flush()
+    return row
+
+
+async def toggle_strategy_enabled(db: AsyncSession, name: str, enabled: bool) -> Optional[Strategy]:
+    q = select(Strategy).where(Strategy.name == name)
+    result = await db.execute(q)
+    row = result.scalar_one_or_none()
+    if row:
+        row.enabled = enabled
+        row.updated_at = datetime.now()
+        await db.flush()
+    return row
+
+
 async def save_signal(db: AsyncSession, **kwargs) -> StrategySignal:
     signal = StrategySignal(**kwargs)
     db.add(signal)

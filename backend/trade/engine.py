@@ -139,7 +139,7 @@ class TradeEngine:
         return True
 
     def _load_strategies(self) -> None:
-        from backend.engine.bonus_stocks import BonusStocksStrategy
+        from src.strategies.bonus_stocks import BonusStocksStrategy
 
         instance = create("bonus_stocks")
         if instance:

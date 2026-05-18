@@ -31,20 +31,29 @@ def is_investment_day(now: datetime, investment_days: list[str]) -> bool:
 
     Args:
         now: 当前时间
-        investment_days: 定投日列表，支持中英文，如 ["周三", "Wed", "周五"]
+        investment_days: 定投日列表，支持中英文，如 ["周三", "Wednesday", "周五"]
 
     Returns:
         bool: 是否为定投日
     """
     # 中文和英文映射
     chinese_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
-    english_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    english_short = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    english_full = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     weekday = now.weekday()
 
-    today_chinese = chinese_names[weekday]
-    today_english = english_names[weekday]
+    today_variants = {
+        chinese_names[weekday],
+        english_short[weekday],
+        english_full[weekday],
+    }
 
-    return today_chinese in investment_days or today_english in investment_days
+    for day in investment_days:
+        if day in today_variants:
+            return True
+        if day.lower() == english_full[weekday].lower():
+            return True
+    return False
 
 
 def should_skip_log(now: datetime, investment_days: list[str] = None) -> bool:

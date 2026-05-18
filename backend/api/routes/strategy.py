@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.database import get_session
-from backend.db.repository import get_strategies
+from backend.db.repository import get_strategies, toggle_strategy_enabled
 from backend.api.models import StrategyInfo, StrategyToggle
 
 router = APIRouter()
@@ -27,7 +27,9 @@ async def list_strategies(db: AsyncSession = Depends(get_session)):
 
 @router.post("/toggle")
 async def toggle_strategy(body: StrategyToggle, db: AsyncSession = Depends(get_session)):
-    return {"name": body.name, "enabled": body.enabled}
+    row = await toggle_strategy_enabled(db, body.name, body.enabled)
+    await db.commit()
+    return {"name": body.name, "enabled": body.enabled, "success": row is not None}
 
 
 @router.get("/{name}/signals")

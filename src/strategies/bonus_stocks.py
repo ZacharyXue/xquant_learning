@@ -7,7 +7,7 @@
 定投数量：json文件配置，单位为股
 定投策略为多个短期指标指导买入额度，或者取消买入
 - 计算 RSI，大于 60 时不买入，小于 20 时不额外增加
-- 计算乖离率（乖离率 = (现价 - 250 均线) / 250 均线），超过 5% 时不买入，小于 -15% 时不额外增加 
+- 计算乖离率（乖离率 = (现价 - 250 均线) / 250 均线），超过 5% 时不买入，小于 -15% 时不额外增加
 - 计算当日开盘价相比前日的涨幅，涨幅超过 1% 时减少买入份额
 
 # 代码要求
@@ -23,10 +23,22 @@ from datetime import datetime, timedelta
 from typing import Optional
 from dataclasses import dataclass
 
-import xtquant.xtdata as xtdata
+try:
+    from utils.logger import get_logger
+    from utils.config import Config
+    _LEGACY_AVAILABLE = True
+except ImportError:
+    get_logger = None  # type: ignore
+    Config = None  # type: ignore
+    _LEGACY_AVAILABLE = False
 
-from utils.logger import get_logger
-from utils.config import Config
+try:
+    import xtquant.xtdata as xtdata
+    _XTQUANT_AVAILABLE = True
+except ImportError:
+    xtdata = None  # type: ignore
+    _XTQUANT_AVAILABLE = False
+
 from .strategy_utils import (
     calculate_rsi,
     calculate_ma,
@@ -35,9 +47,17 @@ from .strategy_utils import (
     round_to_lot_size,
     is_investment_day,
 )
-from ..trade_db import record_buy
 
-_logger = get_logger("bonus_stocks")
+try:
+    from ..trade_db import record_buy
+except ImportError:
+    record_buy = None  # type: ignore
+
+if _LEGACY_AVAILABLE:
+    _logger = get_logger("bonus_stocks")
+else:
+    import logging
+    _logger = logging.getLogger("bonus_stocks")
 
 
 @dataclass
@@ -199,7 +219,13 @@ class BonusStocksPolicy:
         self._load_historical_data()
 
     def _load_historical_data(self):
-        """使用xtquant预加载历史数据"""
+        """使用xtquant预加载历史数据（需要 QMT 运行时可用）"""
+        if not _XTQUANT_AVAILABLE:
+            self.logger.warning("xtquant 不可用，跳过历史数据加载（将使用实时数据累积）")
+            for etf in self.config.etfs:
+                self.price_history[etf.code] = []
+            return
+
         self.logger.info("开始加载ETF历史数据...")
 
         # 需要获取足够的历史数据用于计算RSI和250日均线
@@ -524,3 +550,223 @@ class BonusStocksPolicy:
                 "price": 0
             }
         }
+
+
+# ============================================================
+# 平台集成: StrategyBase 兼容的策略类 (可被 TradeEngine 加载)
+# ============================================================
+
+try:
+    from backend.engine.strategy_registry import register
+    from backend.engine.strategy_base import StrategyBase, Signal, Quote
+    _PLATFORM_AVAILABLE = True
+except ImportError:
+    _PLATFORM_AVAILABLE = False
+
+
+if _PLATFORM_AVAILABLE:
+
+    DEFAULT_PARAMS = {
+        "investment_days": ["Wednesday"],
+        "base_volume": 500,
+        "lot_size": 100,
+        "rsi_period": 14,
+        "rsi_overbought": 70,
+        "rsi_oversold": 30,
+        "rsi_additional": 100,
+        "bias_ma_period": 250,
+        "bias_upper": 0.10,
+        "bias_lower": -0.10,
+        "bias_additional": 100,
+        "open_change_threshold": 0.01,
+    }
+
+    @register
+    class BonusStocksStrategy(StrategyBase):
+        """红利ETF定投策略 (平台集成版本)"""
+
+        name = "bonus_stocks"
+        display_name = "红利ETF定投"
+        description = "每周三基于RSI和均线乖离率择时买入红利ETF"
+
+        watched_stocks = [
+            "510880.SH",  # 红利ETF
+            "159905.SZ",  # 深红利ETF
+        ]
+
+        def __init__(self, config: dict = None):
+            super().__init__(config)
+            self._price_history: dict[str, list[float]] = {}
+            self._last_trade_date: Optional[str] = None
+
+        @property
+        def params(self) -> dict:
+            return {**DEFAULT_PARAMS, **self._config}
+
+        async def on_quote(self, quote: Quote) -> Optional[Signal]:
+            now = datetime.now()
+
+            # 交易时间检查
+            if now.hour < 9 or (now.hour == 9 and now.minute < 30):
+                return None
+            if now.hour > 14 or (now.hour == 14 and now.minute >= 55):
+                return None
+
+            # 定投日检查
+            days = self.params["investment_days"]
+            if not is_investment_day(now, days):
+                return None
+
+            # 当日已处理则跳过
+            today_str = now.strftime("%Y%m%d")
+            if self._last_trade_date == today_str:
+                return None
+
+            # 更新价格历史
+            code = quote.stock_code
+            if code not in self._price_history:
+                self._price_history[code] = []
+            self._price_history[code].append(quote.last_price)
+            if len(self._price_history[code]) > 400:
+                self._price_history[code] = self._price_history[code][-400:]
+
+            # 计算指标
+            indicators = self._calc_indicators(code, quote.last_price, quote.open, quote.last_close)
+            if not indicators:
+                return None
+
+            # 决策
+            volume = self._decide_volume(indicators)
+            if volume <= 0:
+                return Signal(
+                    stock_code=code,
+                    side="skip",
+                    reason=indicators.get("skip_reason", "不满足买入条件"),
+                    indicators=indicators,
+                )
+
+            volume = round_to_lot_size(volume, self.params["lot_size"])
+            self._last_trade_date = today_str
+
+            return Signal(
+                stock_code=code,
+                side="buy",
+                volume=volume,
+                reason=indicators.get("buy_reason", "定投"),
+                indicators=indicators,
+            )
+
+        def _calc_indicators(self, stock_code: str, last_price: float,
+                            open_price: float, last_close: float) -> Optional[dict]:
+            prices = self._price_history.get(stock_code, [])
+            needed = max(self.params["rsi_period"], self.params["bias_ma_period"])
+            if len(prices) < needed + 1:
+                return None
+
+            rsi_value = calculate_rsi(prices, self.params["rsi_period"])
+            ma_value = calculate_ma(prices, self.params["bias_ma_period"])
+            bias_value = calculate_bias_rate(last_price, ma_value) if ma_value else None
+            open_change = calculate_open_change_ratio(open_price, last_close)
+
+            return {
+                "rsi": rsi_value,
+                "ma": ma_value,
+                "bias": bias_value,
+                "open_change": open_change,
+                "last_price": last_price,
+            }
+
+        def _decide_volume(self, indicators: dict) -> int:
+            p = self.params
+            base = p["base_volume"]
+            additional = 0
+            reasons = []
+            skip_reason = ""
+
+            rsi = indicators["rsi"]
+            bias = indicators["bias"]
+            open_change = indicators["open_change"]
+
+            if rsi is not None:
+                if rsi > p["rsi_overbought"]:
+                    indicators["skip_reason"] = f"RSI({rsi:.1f}) > {p['rsi_overbought']} (超买)"
+                    return 0
+                elif rsi < p["rsi_oversold"]:
+                    additional += p["rsi_additional"]
+                    reasons.append(f"RSI超卖({rsi:.1f})")
+
+            if bias is not None:
+                if bias > p["bias_upper"]:
+                    indicators["skip_reason"] = f"乖离率({bias:.2%}) > {p['bias_upper']:.0%} (偏离过大)"
+                    return 0
+                elif bias < p["bias_lower"]:
+                    additional += p["bias_additional"]
+                    reasons.append(f"负乖离({bias:.3f})")
+
+            if open_change is not None and abs(open_change) > p["open_change_threshold"]:
+                ratio = p["open_change_threshold"] / abs(open_change)
+                additional = int(additional * ratio)
+                reasons.append(f"跳空调整(x{ratio:.2f})")
+
+            volume = base + additional
+            indicators["buy_reason"] = " | ".join(reasons) if reasons else "定投"
+            indicators["base_volume"] = base
+            indicators["additional_volume"] = additional
+            indicators["final_volume"] = volume
+            return volume
+
+        def get_config_schema(self) -> dict:
+            return {
+                "type": "object",
+                "properties": {
+                    "investment_days": {
+                        "type": "array", "items": {"type": "string"},
+                        "title": "定投日", "default": ["Wednesday"],
+                    },
+                    "base_volume": {
+                        "type": "integer", "title": "基础份数",
+                        "default": 500, "minimum": 100, "step": 100,
+                    },
+                    "lot_size": {
+                        "type": "integer", "title": "每手股数",
+                        "default": 100, "minimum": 1,
+                    },
+                    "rsi_period": {
+                        "type": "integer", "title": "RSI周期",
+                        "default": 14, "minimum": 5, "maximum": 50,
+                    },
+                    "rsi_overbought": {
+                        "type": "integer", "title": "RSI超买阈值",
+                        "default": 70, "minimum": 50, "maximum": 90,
+                    },
+                    "rsi_oversold": {
+                        "type": "integer", "title": "RSI超卖阈值",
+                        "default": 30, "minimum": 10, "maximum": 50,
+                    },
+                    "rsi_additional": {
+                        "type": "integer", "title": "RSI超卖加仓",
+                        "default": 100, "minimum": 0, "maximum": 500,
+                    },
+                    "bias_ma_period": {
+                        "type": "integer", "title": "均线周期",
+                        "default": 250, "minimum": 50, "maximum": 500,
+                    },
+                    "bias_upper": {
+                        "type": "number", "title": "乖离率上限",
+                        "default": 0.10, "minimum": 0.01, "maximum": 0.50,
+                    },
+                    "bias_lower": {
+                        "type": "number", "title": "乖离率下限",
+                        "default": -0.10, "minimum": -0.50, "maximum": -0.01,
+                    },
+                    "bias_additional": {
+                        "type": "integer", "title": "负乖离加仓",
+                        "default": 100, "minimum": 0, "maximum": 500,
+                    },
+                    "open_change_threshold": {
+                        "type": "number", "title": "开盘跳空阈值",
+                        "default": 0.01, "minimum": 0.001, "maximum": 0.10,
+                    },
+                },
+            }
+
