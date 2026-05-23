@@ -1,6 +1,10 @@
 """交易记录 API"""
 
+import csv
+import io
+
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.db.database import get_session
@@ -69,3 +73,36 @@ async def get_trade_detail(trade_id: int, db: AsyncSession = Depends(get_session
         if t.id == trade_id:
             return t
     return None
+
+
+@router.get("/export/csv")
+async def export_trades_csv(
+    strategy_name: str = None,
+    trade_mode: str = None,
+    limit: int = Query(1000, le=5000),
+    db: AsyncSession = Depends(get_session),
+):
+    items = await query_trades(db, strategy_name=strategy_name, trade_mode=trade_mode, limit=limit)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["id", "strategy", "stock_code", "side", "volume", "price",
+                      "status", "commission", "stamp_tax", "transfer_fee",
+                      "slippage", "amount", "trade_mode", "trade_time"])
+    for t in items:
+        writer.writerow([
+            t.id, t.strategy_name, t.stock_code, t.side, t.volume,
+            float(t.filled_price or t.order_price or 0),
+            t.status,
+            float(t.commission or 0), float(t.stamp_tax or 0),
+            float(t.transfer_fee or 0), float(t.slippage or 0),
+            float(t.amount or 0), t.trade_mode,
+            t.trade_time.isoformat() if t.trade_time else "",
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=trades.csv"},
+    )

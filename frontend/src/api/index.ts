@@ -26,6 +26,14 @@ export async function toggleStrategy(name: string, enabled: boolean): Promise<vo
   })
 }
 
+export async function updateStrategyConfig(name: string, config: Record<string, any>): Promise<void> {
+  await fetch(`${API}/strategy/${name}/config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ config }),
+  })
+}
+
 // ---- Trade History ----
 export async function fetchTrades(params: {
   strategy_name?: string

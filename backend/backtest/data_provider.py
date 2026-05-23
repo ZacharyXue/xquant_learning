@@ -21,6 +21,7 @@ class DataProvider:
 
     def __init__(self, prefer: str = "xtquant"):
         self._prefer = prefer
+        self._cache: dict[str, pd.DataFrame] = {}
 
     def get_kline(
         self,
@@ -45,21 +46,30 @@ class DataProvider:
         if fields is None:
             fields = ["close", "open", "high", "low", "volume"]
 
+        # 缓存检查
+        cache_key = f"{stock_code}:{start_time}:{end_time}:{period}"
+        if cache_key in self._cache:
+            logger.debug(f"Cache hit: {stock_code} ({start_time}-{end_time})")
+            return self._cache[cache_key]
+
         # 优先 xtquant
+        data = None
         if self._prefer == "xtquant":
             data = self._from_xtquant(stock_code, start_time, end_time, fields, period)
-            if data is not None and len(data) > 0:
-                return data
 
         # 回退 akshare
-        logger.info(f"Falling back to akshare for {stock_code}")
-        data = self._from_akshare(stock_code, start_time, end_time, period)
-        if data is not None and len(data) > 0:
-            return data
+        if data is None or len(data) == 0:
+            logger.info(f"Falling back to akshare for {stock_code}")
+            data = self._from_akshare(stock_code, start_time, end_time, period)
 
         # 最终回退: 合成数据
-        logger.warning(f"Both xtquant and akshare unavailable, using synthetic data for {stock_code}")
-        return self._synthetic(stock_code, start_time, end_time)
+        if data is None or len(data) == 0:
+            logger.warning(f"Both xtquant and akshare unavailable, using synthetic data for {stock_code}")
+            data = self._synthetic(stock_code, start_time, end_time)
+
+        if data is not None and len(data) > 0:
+            self._cache[cache_key] = data
+        return data
 
     def _from_xtquant(
         self, stock_code: str, start_time: str, end_time: str,

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.db.database import get_session
 from backend.db.repository import get_latest_account, get_latest_positions, query_trades
 from backend.api.models import DashboardData
+from backend.engine.strategy_registry import get_active_instances
 
 router = APIRouter()
 
@@ -18,6 +19,11 @@ async def get_dashboard(
     account = await get_latest_account(db, trade_mode)
     positions = await get_latest_positions(db, trade_mode)
     recent_trades = await query_trades(db, trade_mode=trade_mode, limit=10)
+
+    try:
+        active = [s.name for s in get_active_instances()]
+    except Exception:
+        active = []
 
     return DashboardData(
         total_asset=float(account.total_asset) if account else 0.0,
@@ -43,5 +49,5 @@ async def get_dashboard(
             "amount": float(t.amount) if t.amount else 0,
             "trade_time": t.trade_time.isoformat() if t.trade_time else "",
         } for t in recent_trades],
-        active_strategies=[],
+        active_strategies=active,
     )
