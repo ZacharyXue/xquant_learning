@@ -112,3 +112,16 @@ export async function fetchTradeMode(): Promise<string> {
 export async function updateTradeMode(mode: string): Promise<void> {
   await fetch(`${API}/settings/trade-mode?mode=${mode}`, { method: 'PUT' })
 }
+
+export async function fetchRiskConfig(): Promise<Record<string, number>> {
+  const res = await fetch(`${API}/settings/risk`)
+  return res.json()
+}
+
+export async function updateRiskConfig(data: Record<string, number>): Promise<void> {
+  await fetch(`${API}/settings/risk`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}

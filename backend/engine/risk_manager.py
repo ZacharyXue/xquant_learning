@@ -20,6 +20,8 @@ class RiskLimits:
     max_total_positions: int = 5            # 最大持仓股票数
     max_order_frequency: int = 5            # 每分钟最大下单次数
     min_cash_reserve: float = 1000.0       # 最低现金保留
+    stop_loss_pct: float = -0.05           # 止损线 (-5%)
+    take_profit_pct: float = 0.15          # 止盈线 (+15%)
 
 
 class RiskManager:
@@ -81,6 +83,34 @@ class RiskManager:
         if current_vol < volume:
             return False, f"Insufficient position ({current_vol} < {volume})"
         return True, "OK"
+
+    def check_position_risk(
+        self,
+        stock_code: str,
+        current_price: float,
+        positions: dict[str, dict],
+    ) -> tuple[str, str]:
+        """检查持仓风控 (止损/止盈)
+
+        Returns:
+            (action, reason) - action 为 "sell"/"hold", reason 为原因
+        """
+        pos = positions.get(stock_code, {})
+        if not pos or pos.get("volume", 0) <= 0:
+            return "hold", ""
+
+        avg_cost = pos.get("avg_cost", 0)
+        if avg_cost <= 0:
+            return "hold", ""
+
+        pnl_pct = (current_price - avg_cost) / avg_cost
+
+        if self.limits.stop_loss_pct and pnl_pct <= self.limits.stop_loss_pct:
+            return "sell", f"Stop-loss triggered: PnL={pnl_pct:.2%} <= {self.limits.stop_loss_pct:.2%}"
+        if self.limits.take_profit_pct and pnl_pct >= self.limits.take_profit_pct:
+            return "sell", f"Take-profit triggered: PnL={pnl_pct:.2%} >= {self.limits.take_profit_pct:.2%}"
+
+        return "hold", ""
 
     def record_order(self, stock_code: str) -> bool:
         """记录下单，检查频率"""

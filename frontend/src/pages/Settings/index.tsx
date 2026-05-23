@@ -7,6 +7,7 @@ import {
   fetchFeeConfig, updateFeeConfig,
   fetchSlippageConfig, updateSlippageConfig,
   fetchTradingHours, fetchTradeMode, updateTradeMode,
+  fetchRiskConfig, updateRiskConfig,
 } from '../../api'
 
 const { Title } = Typography
@@ -14,6 +15,7 @@ const { Title } = Typography
 export default function SettingsPage() {
   const [feeForm] = Form.useForm()
   const [slipForm] = Form.useForm()
+  const [riskForm] = Form.useForm()
   const [loading, setLoading] = useState(false)
   const [tradeMode, setTradeMode] = useState('sim')
   const [tradingHours, setTradingHours] = useState<any>({})
@@ -25,9 +27,11 @@ export default function SettingsPage() {
       const slip = await fetchSlippageConfig()
       const hours = await fetchTradingHours()
       const mode = await fetchTradeMode()
+      const risk = await fetchRiskConfig()
 
       feeForm.setFieldsValue(fee)
       slipForm.setFieldsValue(slip)
+      riskForm.setFieldsValue(risk)
       setTradingHours(hours)
       setTradeMode(mode)
     } catch {
@@ -49,6 +53,12 @@ export default function SettingsPage() {
     const vals = slipForm.getFieldsValue()
     await updateSlippageConfig(vals)
     message.success('滑点配置已保存')
+  }
+
+  const saveRisk = async () => {
+    const vals = riskForm.getFieldsValue()
+    await updateRiskConfig(vals)
+    message.success('风控配置已保存')
   }
 
   const handleModeChange = async (checked: boolean) => {
@@ -108,6 +118,26 @@ export default function SettingsPage() {
             </Form.Item>
             <Form.Item>
               <Button type="primary" onClick={saveSlippage}>保存滑点</Button>
+            </Form.Item>
+          </Form>
+        </Card>
+
+        <Card title="风控配置" style={{ marginBottom: 16 }}>
+          <Form form={riskForm} layout="inline">
+            <Form.Item name="max_position_per_stock" label="单股上限(股)">
+              <InputNumber step={100} style={{ width: 110 }} />
+            </Form.Item>
+            <Form.Item name="max_total_positions" label="最大持仓数">
+              <InputNumber step={1} min={1} max={20} style={{ width: 80 }} />
+            </Form.Item>
+            <Form.Item name="stop_loss_pct" label="止损线">
+              <InputNumber step={0.01} precision={2} style={{ width: 90 }} />
+            </Form.Item>
+            <Form.Item name="take_profit_pct" label="止盈线">
+              <InputNumber step={0.01} precision={2} style={{ width: 90 }} />
+            </Form.Item>
+            <Form.Item>
+              <Button type="primary" onClick={saveRisk}>保存风控</Button>
             </Form.Item>
           </Form>
         </Card>

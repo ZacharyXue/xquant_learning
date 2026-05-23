@@ -76,13 +76,20 @@ class TradeEngine:
         self._tracker = OrderTracker(timeout=5.0)
 
         # 创建执行器，注入回调桥
-        self._executor = RealTradeExecutor(
-            config={
-                "qmt_path": settings.trade.qmt_path,
-                "account_id": settings.trade.account_id,
-            },
-            callback=TraderCallbackBridge(self._tracker),
-        )
+        mode = settings.trade.mode
+        if mode == "sim":
+            from backend.trade.sim_executor import SimTradeExecutor
+            self._executor = SimTradeExecutor()
+            logger.info("Using SimTradeExecutor (paper trading mode)")
+        else:
+            self._executor = RealTradeExecutor(
+                config={
+                    "qmt_path": settings.trade.qmt_path,
+                    "account_id": settings.trade.account_id,
+                },
+                callback=TraderCallbackBridge(self._tracker),
+            )
+            logger.info("Using RealTradeExecutor (live trading mode)")
 
         ok = await self._executor.initialize()
         if not ok:

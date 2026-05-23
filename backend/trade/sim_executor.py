@@ -256,7 +256,30 @@ class SimTradeExecutor(TradeExecutor):
             self._quote_stream_active = False
 
     async def get_history_kline(self, request: trade_pb2.KlineRequest) -> trade_pb2.KlineResponse:
-        return trade_pb2.KlineResponse(success=False, error="Sim mode: no historical data source configured")
+        try:
+            from backend.backtest.data_provider import DataProvider
+            dp = DataProvider(prefer="xtquant")
+            df = dp.get_kline(
+                request.stock_code,
+                request.start_time,
+                request.end_time,
+                period=request.period or "1d",
+            )
+            if df is None or len(df) == 0:
+                return trade_pb2.KlineResponse(success=False, error="No data")
+            bars = []
+            for _, row in df.iterrows():
+                bars.append(trade_pb2.KlineBar(
+                    time=str(row["time"]),
+                    open=float(row["open"]),
+                    high=float(row["high"]),
+                    low=float(row["low"]),
+                    close=float(row["close"]),
+                    volume=float(row["volume"]),
+                ))
+            return trade_pb2.KlineResponse(success=True, bars=bars)
+        except Exception as e:
+            return trade_pb2.KlineResponse(success=False, error=str(e))
 
     async def get_stock_list(self, request: trade_pb2.StockListRequest) -> trade_pb2.StockListResponse:
         return trade_pb2.StockListResponse(success=True, stocks=[])
