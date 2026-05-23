@@ -47,12 +47,20 @@ class MetricsCalculator:
         # 年化收益率
         days = len(values)
         years = days / 252.0
-        annualized_return = (final_value / initial_capital) ** (1.0 / years) - 1 if years > 0 else 0.0
+        try:
+            annualized_return = (final_value / initial_capital) ** (1.0 / years) - 1 if years > 0 else 0.0
+        except (OverflowError, ValueError, ZeroDivisionError):
+            annualized_return = 0.0
+
+        if np.isnan(annualized_return) or np.isinf(annualized_return):
+            annualized_return = 0.0
 
         # 最大回撤
         peak = np.maximum.accumulate(values)
-        drawdowns = (values - peak) / peak
+        drawdowns = (values - peak) / np.where(peak != 0, peak, 1.0)
         max_drawdown = float(np.min(drawdowns))
+        if np.isnan(max_drawdown) or np.isinf(max_drawdown):
+            max_drawdown = 0.0
 
         # 波动率
         daily_returns = np.diff(values) / values[:-1]
@@ -88,9 +96,13 @@ class MetricsCalculator:
         if len(excess) < 2:
             return 0.0
         std = np.std(excess)
-        if std == 0:
+        if std == 0 or np.isnan(std):
             return 0.0
-        return float(np.mean(excess) / std * np.sqrt(252))
+        sharpe = float(np.mean(excess) / std * np.sqrt(252))
+        if np.isnan(sharpe) or np.isinf(sharpe):
+            return 0.0
+        # DB NUMERIC(10,4) 边界保护
+        return max(-9999.9999, min(9999.9999, sharpe))
 
     @staticmethod
     def _empty_result() -> dict:

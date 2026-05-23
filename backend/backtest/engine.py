@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import concurrent.futures
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -18,6 +19,18 @@ from backend.backtest.metrics import MetricsCalculator
 from backend.trade.fees import FeeCalculator, TradeCost
 
 logger = get_logger("backtest_engine")
+
+# 全局线程池用于回测
+_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+
+def _run_coro_in_thread(coro):
+    """在线程中运行协程并返回结果"""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 class BacktestEngine:
@@ -69,8 +82,15 @@ class BacktestEngine:
         if strategy is None:
             return {"error": f"Strategy '{strategy_name}' not found"}
 
-        # 执行回测
-        return self._run_strategy_loop(df, strategy, initial_capital, stock_code)
+        # 执行回测 (在线程池中运行，避免事件循环冲突)
+        coro = self._run_strategy_loop(df, strategy, initial_capital, stock_code)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return _run_coro_in_thread(coro)
+        else:
+            future = _EXECUTOR.submit(_run_coro_in_thread, coro)
+            return future.result()
 
     def _load_strategy(self, name: str, params: dict = None):
         """加载策略实例"""
@@ -81,10 +101,13 @@ class BacktestEngine:
         instance = create(name, params or {})
         return instance
 
-    def _run_strategy_loop(
+    async def _run_strategy_loop(
         self, df: pd.DataFrame, strategy, initial_capital: float, stock_code: str,
     ) -> dict:
         """逐日执行策略回测循环"""
+        import importlib
+        from unittest.mock import patch
+
         cash = initial_capital
         position = 0  # 持仓数量
         avg_cost = 0.0
@@ -97,6 +120,13 @@ class BacktestEngine:
         days = param.get("investment_days", ["Wednesday"])
         from backend.core.trading_calendar import _WEEKDAY_MAP as weekday_map
 
+        # 策略所在的模块 (用于 mock datetime)
+        strategy_module = importlib.import_module(strategy.__class__.__module__)
+        # 也 mock strategy_utils 的 datetime
+        utils_module = importlib.import_module(
+            strategy.__class__.__module__.rsplit(".", 1)[0] + ".strategy_utils"
+        )
+
         for i, row in df.iterrows():
             date_str = str(row["time"])
             close = float(row["close"])
@@ -106,15 +136,25 @@ class BacktestEngine:
             equity = cash + position * close
             equity_curve.append({"date": date_str, "value": round(equity, 2)})
 
-            # 检查是否为定投日
+            # 解析日期并构造回测时间 (10:30 AM, 交易时段内)
             try:
                 dt = datetime.strptime(date_str, "%Y%m%d")
             except ValueError:
                 continue
+            bt_datetime = dt.replace(hour=10, minute=30)
 
+            # 检查是否为定投日
             weekday = dt.weekday()
-            is_day = any(weekday_map.get(d.strip(), -1) == weekday for d in days)
+            is_day = any(weekday_map.get(d.strip().lower(), -1) == weekday for d in days)
+
             if not is_day:
+                # 非定投日: 仅更新价格历史 (策略需要积累足够数据)
+                code = stock_code
+                if code not in strategy._price_history:
+                    strategy._price_history[code] = []
+                strategy._price_history[code].append(close)
+                if len(strategy._price_history[code]) > 400:
+                    strategy._price_history[code] = strategy._price_history[code][-400:]
                 continue
 
             # 计算信号
@@ -128,15 +168,18 @@ class BacktestEngine:
                 last_close=float(df["close"].iloc[i - 1]) if i > 0 else close,
             )
 
-            # Call strategy synchronously via asyncio.run
-            signal = None
-            try:
-                signal = asyncio.run(strategy.on_quote(quote))
-            except RuntimeError:
-                # If already in an event loop, warn and skip
-                logger.warning(f"Skipping async signal for {date_str}: nested event loop")
-            except Exception as e:
-                logger.error(f"Strategy error on {date_str}: {e}")
+            # Mock datetime.now() 以匹配回测日期和时间
+            with patch.object(strategy_module, 'datetime') as mock_dt1, \
+                 patch.object(utils_module, 'datetime') as mock_dt2:
+                for m in (mock_dt1, mock_dt2):
+                    m.now.return_value = bt_datetime
+                    m.side_effect = lambda *args, **kw: datetime(*args, **kw)
+
+                try:
+                    signal = await strategy.on_quote(quote)
+                except Exception as e:
+                    logger.error(f"Strategy error on {date_str}: {e}")
+                    continue
 
             if signal is None or signal.side == "skip" or signal.volume <= 0:
                 continue

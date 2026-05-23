@@ -20,16 +20,20 @@ CLOSE_CANCEL_TIME = time(14, 50)
 
 # 中国工作日名称映射
 _WEEKDAY_MAP = {
-    "monday": 0, "monday": 0,
-    "tuesday": 1,
-    "wednesday": 2,
-    "thursday": 3,
-    "friday": 4,
-    "saturday": 5,
-    "sunday": 6,
-    "周一": 0, "星期二": 1, "星期三": 2, "星期四": 3,
-    "周五": 4, "周六": 5, "周日": 6,
-    "星期一": 0, "星期三": 2, "星期五": 4,
+    "monday": 0, "mon": 0,
+    "tuesday": 1, "tue": 1,
+    "wednesday": 2, "wed": 2,
+    "thursday": 3, "thu": 3,
+    "friday": 4, "fri": 4,
+    "saturday": 5, "sat": 5,
+    "sunday": 6, "sun": 6,
+    "周一": 0, "星期一": 0,
+    "周二": 1, "星期二": 1,
+    "周三": 2, "星期三": 2,
+    "周四": 3, "星期四": 3,
+    "周五": 4, "星期五": 4,
+    "周六": 5, "星期六": 5,
+    "周日": 6, "星期日": 6,
 }
 
 

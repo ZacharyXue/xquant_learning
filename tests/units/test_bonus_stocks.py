@@ -351,14 +351,14 @@ class TestBonusStocksPolicy:
         """测试非定投日不交易"""
         policy = BonusStocksPolicy(mock_config)
 
-        # 设置定投日为周一，确保今天不是定投日
+        # 设置定投日为周一，模拟周三 (非定投日)
         policy.config.investment_days = ["Mon"]
 
         data = {"000001.SH": {"lastPrice": 100}}
 
-        # 模拟周一交易时间
-        with patch('strategies.bonus_stocks.datetime') as mock_datetime:
-            mock_datetime.now.return_value = datetime(2025, 1, 13, 10, 30)  # 周一
+        # 模拟周三交易时间 (非定投日 -> 应返回 None)
+        with patch('src.strategies.bonus_stocks.datetime') as mock_datetime:
+            mock_datetime.now.return_value = datetime(2025, 1, 15, 10, 30)  # 周三
             mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
 
             decision = policy(data)

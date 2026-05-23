@@ -83,6 +83,7 @@ export interface BacktestResult {
   calmar_ratio: number
   equity_curve: { date: string; value: number }[]
   buy_signals: { date: string; price: number }[]
+  error_msg?: string
 }
 
 export interface BacktestRun {
@@ -92,6 +93,7 @@ export interface BacktestRun {
   start_date: string
   end_date: string
   status: string
+  error_msg?: string
   started_at: string
 }
 

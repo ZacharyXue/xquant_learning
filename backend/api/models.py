@@ -103,6 +103,7 @@ class BacktestResultOut(BaseModel):
     calmar_ratio: float = 0.0
     equity_curve: list = []
     buy_signals: list = []
+    error_msg: str = ""
 
 
 class ParamOptimizeRequest(BaseModel):
