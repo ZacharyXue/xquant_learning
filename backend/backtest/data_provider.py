@@ -5,7 +5,6 @@
 两者均不可用时使用合成数据 (随机游走) 保证回测功能可用。
 """
 
-import random
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -22,8 +21,6 @@ class DataProvider:
 
     def __init__(self, prefer: str = "xtquant"):
         self._prefer = prefer
-        random.seed(42)
-        np.random.seed(42)
 
     def get_kline(
         self,
@@ -69,8 +66,27 @@ class DataProvider:
         fields: list[str], period: str,
     ) -> Optional[pd.DataFrame]:
         """从 xtquant 获取数据"""
+        import sys as _sys
+        import os as _os
+
+        # 确保 QMT SDK 路径在 sys.path 中 (即使 XTQUANT_TESTING=1)
+        _qmt_sp = r"D:\国金证券QMT交易端\bin.x64\Lib\site-packages"
+        if _os.path.isdir(_qmt_sp) and _qmt_sp not in _sys.path:
+            _sys.path.append(_qmt_sp)
+
         try:
             from xtquant import xtdata
+
+            # 确保数据已下载到本地缓存
+            try:
+                xtdata.download_history_data(
+                    stock_code=stock_code,
+                    period=period,
+                    start_time=start_time,
+                    end_time=end_time,
+                )
+            except Exception:
+                pass  # 下载失败不影响读取已有缓存
 
             data = xtdata.get_market_data(
                 field_list=fields,
@@ -149,7 +165,8 @@ class DataProvider:
     ) -> pd.DataFrame:
         """生成合成K线数据 (随机游走)
 
-        根据股票代码选择合理的起始价格和波动率。
+        根据股票代码设置合理的起始价格和波动率。
+        使用代码+日期作为种子，确保同代码同日期可复现。
         """
         dates = _generate_trading_dates(start_time, end_time)
         n = len(dates)
@@ -159,7 +176,7 @@ class DataProvider:
         # 根据代码类型估算初始价格
         code = stock_code.replace(".SH", "").replace(".SZ", "")
         if code.startswith("51") or code.startswith("15"):
-            # ETF: 通常在 0.5-5 元范围，波动率低
+            # ETF: 通常在 0.5-5 元范围
             base_price = float(code[-3:]) / 100.0 + 1.0
             base_price = max(0.8, min(6.0, base_price))
             daily_vol = 0.008
@@ -173,16 +190,20 @@ class DataProvider:
             base_price = 10.0
             daily_vol = 0.015
 
+        # 基于股票代码和日期范围的确定性种子
+        seed_val = hash(stock_code + start_time + end_time) % (2 ** 31)
+        rng = np.random.RandomState(seed_val)
+
         # 随机游走生成收盘价
-        returns = np.random.normal(0.0002, daily_vol, n)
+        returns = rng.normal(0.0002, daily_vol, n)
         log_prices = np.log(base_price) + np.cumsum(returns)
         closes = np.exp(log_prices)
 
         # 根据收盘价生成 OHLC
-        opens = closes * (1 + np.random.normal(0, 0.005, n))
-        highs = np.maximum(opens, closes) * (1 + np.abs(np.random.normal(0, 0.008, n)))
-        lows = np.minimum(opens, closes) * (1 - np.abs(np.random.normal(0, 0.008, n)))
-        volumes = np.random.randint(500000, 5000000, n).astype(float)
+        opens = closes * (1 + rng.normal(0, 0.005, n))
+        highs = np.maximum(opens, closes) * (1 + np.abs(rng.normal(0, 0.008, n)))
+        lows = np.minimum(opens, closes) * (1 - np.abs(rng.normal(0, 0.008, n)))
+        volumes = rng.randint(500000, 5000000, n).astype(float)
 
         df = pd.DataFrame({
             "time": dates,

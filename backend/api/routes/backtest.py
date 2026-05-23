@@ -2,6 +2,7 @@
 
 import asyncio
 import traceback
+import math
 from datetime import datetime
 
 from fastapi import APIRouter, Depends
@@ -13,7 +14,7 @@ from backend.db.repository import (
     get_backtest_runs, create_backtest_run, save_backtest_result,
 )
 from backend.db.models import BacktestRun
-from backend.api.models import BacktestRequest, BacktestResultOut
+from backend.api.models import BacktestRequest, BacktestResultOut, ParamOptimizeRequest
 
 logger = get_logger("api.backtest")
 router = APIRouter()
@@ -88,12 +89,18 @@ def _run_backtest_sync(
 
 @router.post("/run")
 async def run_backtest(body: BacktestRequest, db: AsyncSession = Depends(get_session)):
+    try:
+        start_dt = datetime.strptime(body.start_date, "%Y%m%d")
+        end_dt = datetime.strptime(body.end_date, "%Y%m%d")
+    except ValueError as e:
+        return {"status": "error", "error": f"Invalid date format (use YYYYMMDD): {e}"}
+
     run = await create_backtest_run(
         db,
         strategy_name=body.strategy_name,
         stock_code=body.stock_code,
-        start_date=datetime.strptime(body.start_date, "%Y%m%d"),
-        end_date=datetime.strptime(body.end_date, "%Y%m%d"),
+        start_date=start_dt,
+        end_date=end_dt,
         params=body.params or {},
         status="running",
     )
@@ -132,8 +139,150 @@ async def get_history(limit: int = 20, db: AsyncSession = Depends(get_session)):
         "start_date": r.start_date.strftime("%Y%m%d") if r.start_date else "",
         "end_date": r.end_date.strftime("%Y%m%d") if r.end_date else "",
         "status": r.status,
+        "error_msg": r.error_msg,
         "started_at": r.started_at.isoformat() if r.started_at else "",
     } for r in runs]
+
+
+def _run_optimize_sync(
+    run_id: int, strategy_name: str, stock_code: str,
+    start_date: str, end_date: str, param_grid: dict,
+):
+    """在独立线程中执行参数优化并持久化 Top 10 结果"""
+    from backend.backtest.optimizer import GridOptimizer
+
+    try:
+        from src.strategies.bonus_stocks import BonusStocksStrategy  # noqa
+    except ImportError:
+        pass
+
+    opt = GridOptimizer(strategy_name, stock_code, start_date, end_date)
+    try:
+        results = opt.optimize(param_grid)
+    except Exception as e:
+        results = None
+        error = str(e)
+        logger.error(f"Optimize [{run_id}] failed: {e}")
+
+    async def _persist():
+        factory = get_session_factory()
+        async with factory() as db:
+            try:
+                run = await db.get(BacktestRun, run_id)
+                if run is None:
+                    return
+                if results is None:
+                    run.status = "failed"
+                    run.error_msg = error
+                    run.completed_at = datetime.now()
+                    await db.commit()
+                    return
+
+                # 持久化 Top 10 (每个作为独立 backtest_result)
+                top10 = results[:10]
+                for r in top10:
+                    await save_backtest_result(db, run_id=run_id, result=r)
+
+                run.status = "completed"
+                run.completed_at = datetime.now()
+                # 存优化元信息到 params
+                run.params = {
+                    "type": "optimization",
+                    "total_combos": len(results),
+                    "metric": "sharpe_ratio",
+                }
+                await db.commit()
+            except Exception as e:
+                logger.error(f"Failed to persist optimize [{run_id}]: {e}")
+                try:
+                    run = await db.get(BacktestRun, run_id)
+                    if run:
+                        run.status = "failed"
+                        run.error_msg = str(e)[:500]
+                        run.completed_at = datetime.now()
+                        await db.commit()
+                except Exception:
+                    await db.rollback()
+
+    try:
+        asyncio.run(_persist())
+    except RuntimeError:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        loop.run_until_complete(_persist())
+
+
+@router.post("/optimize")
+async def run_optimize(body: ParamOptimizeRequest, db: AsyncSession = Depends(get_session)):
+    param_names = list(body.param_grid.keys())
+    param_values = list(body.param_grid.values())
+    total_combos = math.prod(len(v) for v in param_values)
+
+    try:
+        start_dt = datetime.strptime(body.start_date, "%Y%m%d")
+        end_dt = datetime.strptime(body.end_date, "%Y%m%d")
+    except ValueError as e:
+        return {"status": "error", "error": f"Invalid date format: {e}"}
+
+    run = await create_backtest_run(
+        db,
+        strategy_name=body.strategy_name,
+        stock_code=body.stock_code,
+        start_date=start_dt,
+        end_date=end_dt,
+        params={"type": "optimization", "param_grid": body.param_grid},
+        status="running",
+    )
+    await db.commit()
+    run_id = run.id
+
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(
+        None,
+        _run_optimize_sync,
+        run_id,
+        body.strategy_name,
+        body.stock_code,
+        body.start_date,
+        body.end_date,
+        body.param_grid,
+    )
+
+    logger.info(f"Optimization started: id={run_id} strategy={body.strategy_name} combos={total_combos}")
+    return {
+        "status": "accepted",
+        "run_id": run_id,
+        "strategy": body.strategy_name,
+        "total_combos": total_combos,
+    }
+
+
+@router.get("/optimize/{run_id}")
+async def get_optimize_results(run_id: int, db: AsyncSession = Depends(get_session)):
+    """获取参数优化结果 (Top 10 按 sharpe 排序)"""
+    from sqlalchemy import select
+    from backend.db.models import BacktestResult
+
+    q = select(BacktestResult).where(BacktestResult.run_id == run_id).order_by(
+        BacktestResult.sharpe_ratio.desc()
+    ).limit(10)
+    r = await db.execute(q)
+    rows = r.scalars().all()
+
+    return [{
+        "run_id": row.run_id,
+        "total_trades": row.total_trades or 0,
+        "return_rate": float(row.return_rate or 0),
+        "annualized_return": float(row.annualized_return or 0),
+        "max_drawdown": float(row.max_drawdown or 0),
+        "sharpe_ratio": float(row.sharpe_ratio or 0),
+        "calmar_ratio": float(row.calmar_ratio or 0),
+        "total_investment": float(row.total_investment or 0),
+        "final_value": float(row.final_value or 0),
+    } for row in rows]
 
 
 @router.get("/result/{run_id}", response_model=BacktestResultOut)

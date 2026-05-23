@@ -1,6 +1,6 @@
 import type {
   Strategy, PaginatedTrades, DashboardData,
-  BacktestRequest, BacktestResult, BacktestRun,
+  BacktestRequest, BacktestResult, BacktestRun, OptimizeRequest,
   FeeConfig, SlippageConfig, TradingHoursConfig,
 } from '../types'
 
@@ -59,6 +59,15 @@ export async function fetchBacktestHistory(limit = 20): Promise<BacktestRun[]> {
 
 export async function fetchBacktestResult(runId: number): Promise<BacktestResult> {
   const res = await fetch(`${API}/backtest/result/${runId}`)
+  return res.json()
+}
+
+export async function runOptimize(req: OptimizeRequest): Promise<any> {
+  const res = await fetch(`${API}/backtest/optimize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
   return res.json()
 }
 

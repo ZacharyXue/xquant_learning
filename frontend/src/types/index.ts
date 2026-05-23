@@ -86,6 +86,14 @@ export interface BacktestResult {
   error_msg?: string
 }
 
+export interface OptimizeRequest {
+  strategy_name: string
+  stock_code: string
+  start_date: string
+  end_date: string
+  param_grid: Record<string, number[]>
+}
+
 export interface BacktestRun {
   id: number
   strategy_name: string
