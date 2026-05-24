@@ -144,6 +144,7 @@ class BacktestResult(Base):
     calmar_ratio = Column(Numeric(10, 4))
     equity_curve = Column(JSON, default=list)
     buy_signals = Column(JSON, default=list)
+    benchmark = Column(JSON, default=dict)
     created_at = Column(DateTime, default=datetime.now)
 
 

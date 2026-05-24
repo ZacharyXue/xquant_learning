@@ -81,6 +81,14 @@ async def init_db() -> None:
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # 增量迁移: 添加 benchmark 列
+        try:
+            from sqlalchemy import text
+            await conn.execute(text(
+                "ALTER TABLE backtest_results ADD COLUMN IF NOT EXISTS benchmark JSON DEFAULT '{}'"
+            ))
+        except Exception:
+            pass
 
 
 async def seed_strategies(definitions: list[dict]) -> None:

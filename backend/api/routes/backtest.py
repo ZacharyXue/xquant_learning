@@ -319,4 +319,5 @@ async def get_result(run_id: int, db: AsyncSession = Depends(get_session)):
         calmar_ratio=float(row.calmar_ratio or 0),
         equity_curve=row.equity_curve or [],
         buy_signals=row.buy_signals or [],
+        benchmark=row.benchmark or {},
     )

@@ -104,6 +104,7 @@ class BacktestResultOut(BaseModel):
     equity_curve: list = []
     buy_signals: list = []
     error_msg: str = ""
+    benchmark: dict = {}
 
 
 class ParamOptimizeRequest(BaseModel):
