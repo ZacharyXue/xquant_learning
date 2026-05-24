@@ -68,15 +68,14 @@ class TradeEngine:
         logger.info("TradeEngine initializing...")
         self._state = SessionState.INITIALIZING
 
-        if sys.platform != "win32":
-            logger.warning("TradeEngine requires Windows (xtquant SDK)")
+        # xtquant 仅支持 Windows 平台，但 sim 模式跨平台可用
+        mode = settings.trade.mode
+        if mode != "sim" and sys.platform != "win32":
+            logger.warning("Real trade requires Windows (xtquant SDK). Use sim mode for cross-platform.")
             return False
 
-        # 创建回调桥
         self._tracker = OrderTracker(timeout=5.0)
 
-        # 创建执行器，注入回调桥
-        mode = settings.trade.mode
         if mode == "sim":
             from backend.trade.sim_executor import SimTradeExecutor
             self._executor = SimTradeExecutor()

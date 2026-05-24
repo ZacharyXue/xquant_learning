@@ -14,13 +14,30 @@ import sys
 import os
 import glob
 
-# 必须先移除 XTQUANT_TESTING 环境变量, 否则 xtquant 路径不会被加入 sys.path
 if os.environ.get("XTQUANT_TESTING"):
     del os.environ["XTQUANT_TESTING"]
 
-# 手动添加 QMT SDK 路径
-_QMT_PATH = r"D:\国金证券QMT交易端\bin.x64\Lib\site-packages"
-if os.path.isdir(_QMT_PATH) and _QMT_PATH not in sys.path:
+
+def _find_qmt_sdk():
+    """查找 xtquant SDK 路径 (支持 Windows 和 WSL2 路径)"""
+    env_path = os.environ.get("XTQUANT_QMT_SDK")
+    if env_path and os.path.isdir(env_path):
+        return env_path
+
+    candidates = [
+        r"D:\国金证券QMT交易端\bin.x64\Lib\site-packages",
+        "/mnt/d/国金证券QMT交易端/bin.x64/Lib/site-packages",
+        r"D:\国金QMT交易端\bin.x64\Lib\site-packages",
+        "/mnt/d/国金QMT交易端/bin.x64/Lib/site-packages",
+    ]
+    for p in candidates:
+        if os.path.isdir(p):
+            return p
+    return None
+
+
+_QMT_PATH = _find_qmt_sdk()
+if _QMT_PATH and _QMT_PATH not in sys.path:
     sys.path.append(_QMT_PATH)
 
 print("=" * 55)
@@ -84,6 +101,8 @@ except Exception as e:
 # === Step 4: 查看本地数据缓存 ===
 print("\n[Step 4] Local data cache")
 qmt_root = r"D:\国金证券QMT交易端\bin.x64"
+if not os.path.exists(qmt_root):
+    qmt_root = "/mnt/d/国金证券QMT交易端/bin.x64"
 for sub in ['datadir', 'data', 'cache', r'Lib\site-packages\xtquant\datadir']:
     p = os.path.join(qmt_root, sub)
     if os.path.exists(p):

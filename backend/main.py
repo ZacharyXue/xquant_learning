@@ -88,7 +88,7 @@ def main():
     try:
         if args.trade:
             loop.run_until_complete(start_trade_engine())
-        elif args.full and sys.platform == "win32":
+        elif args.full:
             loop.run_until_complete(start_full())
         else:
             loop.run_until_complete(start_dashboard())

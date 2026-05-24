@@ -76,13 +76,8 @@ class DataProvider:
         fields: list[str], period: str,
     ) -> Optional[pd.DataFrame]:
         """从 xtquant 获取数据"""
-        import sys as _sys
-        import os as _os
-
-        # 确保 QMT SDK 路径在 sys.path 中 (即使 XTQUANT_TESTING=1)
-        _qmt_sp = r"D:\国金证券QMT交易端\bin.x64\Lib\site-packages"
-        if _os.path.isdir(_qmt_sp) and _qmt_sp not in _sys.path:
-            _sys.path.append(_qmt_sp)
+        from backend.core.qmt_paths import ensure_qmt_in_syspath
+        ensure_qmt_in_syspath()
 
         try:
             from xtquant import xtdata

@@ -16,6 +16,7 @@ import pandas as pd
 from backend.core.logging import get_logger
 from backend.backtest.data_provider import DataProvider
 from backend.backtest.metrics import MetricsCalculator
+from backend.engine.indicators import round_to_lot
 from backend.trade.fees import FeeCalculator, TradeCost
 
 logger = get_logger("backtest_engine")
@@ -116,7 +117,15 @@ class BacktestEngine:
         equity_curve = []  # 权益曲线
         buy_signals = []  # 买入信号
 
+        # Benchmark: 同周期固定金额定投 (同等资金、同等定投日、不做择时)
+        bench_cash = initial_capital
+        bench_position = 0
+        bench_avg_cost = 0.0
+        bench_equity_curve = []  # benchmark 权益曲线
+
         param = strategy.params
+        bench_base_volume = param.get("base_volume", 500)
+        bench_lot_size = param.get("lot_size", 100)
         days = param.get("investment_days", ["Wednesday"])
         from backend.core.trading_calendar import _WEEKDAY_MAP as weekday_map
 
@@ -132,9 +141,17 @@ class BacktestEngine:
             close = float(row["close"])
             open_price = float(row["open"]) if pd.notna(row.get("open")) else close
 
-            # 权益曲线
+            # 跳过无效价格 (未上市日期、停牌等)
+            if close <= 0 or np.isnan(close):
+                continue
+
+            # 权益曲线 (策略)
             equity = cash + position * close
             equity_curve.append({"date": date_str, "value": round(equity, 2)})
+
+            # Benchmark 权益曲线
+            bench_equity = bench_cash + bench_position * close
+            bench_equity_curve.append({"date": date_str, "value": round(bench_equity, 2)})
 
             # 解析日期并构造回测时间 (10:30 AM, 交易时段内)
             try:
@@ -156,6 +173,16 @@ class BacktestEngine:
                 if len(strategy._price_history[code]) > 400:
                     strategy._price_history[code] = strategy._price_history[code][-400:]
                 continue
+
+            # === 定投日: Benchmark 固定金额买入 ===
+            bench_vol = round_to_lot(bench_base_volume, bench_lot_size)
+            bench_cost = self._fee_calc.calc_trade_cost(close, bench_vol, "buy")
+            bench_total = close * bench_vol + bench_cost.total
+            if bench_cash >= bench_total:
+                bench_cash -= bench_total
+                old_bench = bench_avg_cost * bench_position
+                bench_position += bench_vol
+                bench_avg_cost = (old_bench + close * bench_vol) / bench_position if bench_position > 0 else 0
 
             # 计算信号
             from backend.engine.strategy_base import Quote
@@ -216,16 +243,26 @@ class BacktestEngine:
             buy_signals.append({"date": date_str, "price": buy_price})
             logger.debug(f"[{date_str}] Buy {stock_code} x{buy_volume} @ {buy_price:.4f} (fee={cost.total:.2f})")
 
-        # 最终平仓
+        # 最终平仓 (策略)
         if position > 0:
             last_close = float(df["close"].iloc[-1])
             final_equity = cash + position * last_close
         else:
             final_equity = cash
 
+        # 最终平仓 (benchmark)
+        if bench_position > 0:
+            bench_final = bench_cash + bench_position * last_close
+        else:
+            bench_final = bench_cash
+
         # 计算指标
         equity_values = [e["value"] for e in equity_curve]
         metrics = self._metrics.calculate(equity_values, initial_capital, trades)
+
+        # Benchmark 指标
+        bench_values = [e["value"] for e in bench_equity_curve]
+        bench_metrics = self._metrics.calculate(bench_values, initial_capital, [])
 
         return {
             "total_trades": len(trades),
@@ -241,6 +278,15 @@ class BacktestEngine:
             "win_rate": metrics.get("win_rate", 0),
             "equity_curve": equity_curve,
             "buy_signals": buy_signals,
+            "benchmark": {
+                "final_value": round(bench_final, 2),
+                "return_rate": bench_metrics["return_rate"],
+                "annualized_return": bench_metrics["annualized_return"],
+                "max_drawdown": bench_metrics["max_drawdown"],
+                "sharpe_ratio": bench_metrics["sharpe_ratio"],
+                "calmar_ratio": bench_metrics["calmar_ratio"],
+                "equity_curve": bench_equity_curve,
+            },
         }
 
 

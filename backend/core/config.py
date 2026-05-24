@@ -62,6 +62,11 @@ class TradeConfig:
 
     def __post_init__(self):
         self.qmt_path = os.getenv("XTQUANT_QMT_PATH", self.qmt_path)
+        if not self.qmt_path:
+            from backend.core.qmt_paths import find_qmt_userdata
+            detected = find_qmt_userdata()
+            if detected:
+                self.qmt_path = detected
         self.account_id = os.getenv("XTQUANT_ACCOUNT_ID", self.account_id)
 
 
