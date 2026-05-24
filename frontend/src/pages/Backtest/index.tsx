@@ -26,7 +26,7 @@ export default function BacktestPage() {
   const [loading, setLoading] = useState(false)
   const [optLoading, setOptLoading] = useState(false)
   const [history, setHistory] = useState<BacktestRun[]>([])
-  const [selectedRun, setSelectedRun] = useState<number | null>(null)
+  const [selectedRun, setSelectedRun] = useState<BacktestRun | null>(null)
   const [optModalOpen, setOptModalOpen] = useState(false)
   const [optForm] = Form.useForm()
 
@@ -88,7 +88,7 @@ export default function BacktestPage() {
   }
 
   if (selectedRun) {
-    return <BacktestResultView runId={selectedRun} onBack={() => { setSelectedRun(null); loadHistory() }} />
+    return <BacktestResultView runId={selectedRun.id} stockCode={selectedRun.stock_code} strategyName={selectedRun.strategy_name} onBack={() => { setSelectedRun(null); loadHistory() }} />
   }
 
   return (
@@ -129,7 +129,7 @@ export default function BacktestPage() {
         <Table
           dataSource={history}
           onRow={r => ({
-            onClick: () => r.status === 'completed' && setSelectedRun(r.id),
+            onClick: () => r.status === 'completed' && setSelectedRun(r),
             style: { cursor: r.status === 'completed' ? 'pointer' : 'default' },
           })}
           columns={[
@@ -142,7 +142,8 @@ export default function BacktestPage() {
               title: '状态', dataIndex: 'status', key: 'status', width: 90,
               render: (v: string) => {
                 const colors: Record<string, string> = { completed: 'green', running: 'blue', failed: 'red' }
-                return <Tag color={colors[v]}>{v}</Tag>
+                const labels: Record<string, string> = { completed: '已完成', running: '运行中', failed: '失败' }
+                return <Tag color={colors[v]}>{labels[v] ?? v}</Tag>
               },
             },
             {

@@ -84,6 +84,15 @@ export interface BacktestResult {
   equity_curve: { date: string; value: number }[]
   buy_signals: { date: string; price: number }[]
   error_msg?: string
+  benchmark?: {
+    final_value: number
+    return_rate: number
+    annualized_return: number
+    max_drawdown: number
+    sharpe_ratio: number
+    calmar_ratio: number
+    equity_curve: { date: string; value: number }[]
+  }
 }
 
 export interface OptimizeRequest {
