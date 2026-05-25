@@ -6,8 +6,10 @@
 - 最大回撤 / 卡玛比率
 - 波动率 / 夏普比率
 - 胜率 / 盈亏比
+- XIRR (资金加权收益率)
 """
 
+from datetime import datetime
 from typing import Optional
 
 import numpy as np
@@ -124,3 +126,60 @@ def annualize_return(total_return: float, days: int) -> float:
         return 0.0
     years = days / 252.0
     return (1 + total_return) ** (1.0 / years) - 1
+
+
+def calc_xirr(cash_flows: list[dict], max_iter: int = 100, tol: float = 1e-8) -> float:
+    """计算资金加权年化收益率 (XIRR)
+
+    使用 Newton-Raphson 法求解 IRR, 再年化。
+
+    Args:
+        cash_flows: 现金流列表 [{date: "20240101", amount: -1000}, ...]
+                   负值 = 资金流出(投入), 正值 = 资金流入(取出/终值)
+        max_iter: 最大迭代次数
+        tol: 收敛容差
+
+    Returns:
+        年化收益率 (小数), 计算失败返回 0.0
+    """
+    if not cash_flows or len(cash_flows) < 2:
+        return 0.0
+
+    # 解析日期并计算距首日天数
+    ref_date = datetime.strptime(str(cash_flows[0]["date"])[:8], "%Y%m%d")
+    times = []
+    amounts = []
+    for cf in cash_flows:
+        t = datetime.strptime(str(cf["date"])[:8], "%Y%m%d")
+        days = (t - ref_date).days
+        times.append(days / 365.25)  # 年化时间
+        amounts.append(float(cf["amount"]))
+
+    amounts_arr = np.array(amounts, dtype=float)
+    times_arr = np.array(times, dtype=float)
+
+    if np.all(amounts_arr <= 0) or np.all(amounts_arr >= 0):
+        return 0.0
+
+    guess = 0.1
+    for _ in range(max_iter):
+        disc = (1.0 + guess) ** times_arr
+        fval = np.sum(amounts_arr / disc)
+        dfval = np.sum(-times_arr * amounts_arr / ((1.0 + guess) ** (times_arr + 1.0)))
+
+        if abs(dfval) < 1e-12:
+            break
+
+        guess_new = guess - fval / dfval
+        if abs(guess_new - guess) < tol:
+            guess = guess_new
+            break
+        if guess_new <= -1.0:
+            guess = guess / 2.0
+        else:
+            guess = guess_new
+
+    if guess <= -1.0 or np.isnan(guess) or np.isinf(guess):
+        return 0.0
+
+    return round(guess, 6)

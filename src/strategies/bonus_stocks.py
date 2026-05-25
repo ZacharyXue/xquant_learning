@@ -588,6 +588,7 @@ if _PLATFORM_AVAILABLE:
         name = "bonus_stocks"
         display_name = "红利ETF定投"
         description = "每周三基于RSI和均线乖离率择时买入红利ETF"
+        strategy_type = "dca"
 
         watched_stocks = [
             "510880.SH",  # 红利ETF
@@ -731,6 +732,10 @@ if _PLATFORM_AVAILABLE:
                         "type": "integer", "title": "每手股数",
                         "default": 100, "minimum": 1,
                     },
+                    "baseline_amount": {
+                        "type": "integer", "title": "基准定投金额",
+                        "default": 1000, "minimum": 100, "step": 100,
+                    },
                     "rsi_period": {
                         "type": "integer", "title": "RSI周期",
                         "default": 14, "minimum": 5, "maximum": 50,
@@ -769,4 +774,28 @@ if _PLATFORM_AVAILABLE:
                     },
                 },
             }
+
+        def get_baseline_config(self) -> dict:
+            return {
+                "baseline_type": self.strategy_type,
+                "index_code": "",
+                "baseline_amount": self.params.get("baseline_amount", 1000),
+                "investment_days": self.params.get("investment_days", ["Wednesday"]),
+                "lot_size": self.params.get("lot_size", 100),
+            }
+
+        def get_tuning_space(self) -> list:
+            from backend.engine.strategy_base import TuneParam
+            return [
+                TuneParam("rsi_period", "int", 5, 50, step=1),
+                TuneParam("rsi_overbought", "int", 60, 80, step=5),
+                TuneParam("rsi_oversold", "int", 20, 40, step=5,
+                          constraints="rsi_oversold < rsi_overbought"),
+                TuneParam("rsi_additional", "int", 0, 300, step=50),
+                TuneParam("bias_ma_period", "int", 50, 500, step=50),
+                TuneParam("bias_upper", "float", 0.03, 0.20),
+                TuneParam("bias_lower", "float", -0.20, -0.03,
+                          constraints="bias_lower < bias_upper"),
+                TuneParam("bias_additional", "int", 0, 300, step=50),
+            ]
 

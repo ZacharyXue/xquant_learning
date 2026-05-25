@@ -41,6 +41,9 @@ class GridOptimizer:
 
         logger.info(f"Grid search: {self._strategy} on {self._stock}, {len(combos)} combinations")
 
+        _strip_keys = {"equity_curve", "buy_signals", "trades", "drawdown_curve",
+                       "monthly_returns", "baseline"}
+
         results = []
         for i, combo in enumerate(combos):
             params = dict(zip(param_names, combo))
@@ -49,14 +52,13 @@ class GridOptimizer:
             )
             it = {
                 "params": params,
-                **{k: v for k, v in result.items() if k not in ("equity_curve", "buy_signals")},
+                **{k: v for k, v in result.items() if k not in _strip_keys},
             }
             results.append(it)
 
             if (i + 1) % 20 == 0:
                 logger.info(f"Grid progress: {i + 1}/{len(combos)}")
 
-        # 按优化目标排序
         results.sort(key=lambda r: r.get(metric, 0), reverse=True)
         logger.info(f"Optimization complete. Best {metric}: {results[0].get(metric, 'N/A')}")
         return results

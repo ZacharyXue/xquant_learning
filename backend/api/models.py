@@ -96,15 +96,22 @@ class BacktestResultOut(BaseModel):
     win_rate: float = 0.0
     total_investment: float = 0.0
     final_value: float = 0.0
+    total_return: float = 0.0
     return_rate: float = 0.0
     annualized_return: float = 0.0
     max_drawdown: float = 0.0
+    volatility: float = 0.0
     sharpe_ratio: float = 0.0
     calmar_ratio: float = 0.0
+    xirr: float = 0.0
+    return_on_deployed: float = 0.0
     equity_curve: list = []
     buy_signals: list = []
+    trades: list = []
+    drawdown_curve: list = []
+    monthly_returns: list = []
     error_msg: str = ""
-    benchmark: dict = {}
+    baseline: dict = {}
 
 
 class ParamOptimizeRequest(BaseModel):
@@ -113,6 +120,21 @@ class ParamOptimizeRequest(BaseModel):
     start_date: str
     end_date: str
     param_grid: dict
+
+
+class AdvancedOptimizeRequest(BaseModel):
+    strategy_name: str
+    stock_code: str
+    start_date: str
+    end_date: str
+    method: str = "optuna"          # "optuna" | "grid" | "random"
+    metric: str = "sharpe_ratio"    # 优化目标指标
+    n_trials: int = 100
+    n_jobs: int = 1
+    validation: str = "none"        # "none" | "walkforward"
+    walkforward_train_years: int = 3
+    walkforward_test_years: int = 1
+    param_overrides: dict = {}      # 手动覆盖搜索空间范围
 
 
 # === Settings ===

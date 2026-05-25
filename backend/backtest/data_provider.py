@@ -3,8 +3,12 @@
 
 优先使用 xtquant (QMT) 获取真实数据，跨平台时回退 akshare。
 两者均不可用时使用合成数据 (随机游走) 保证回测功能可用。
+
+数据获取流水: 内存缓存 → 文件缓存(.parquet) → xtquant → akshare → 合成
 """
 
+import os
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -15,6 +19,67 @@ from backend.core.logging import get_logger
 
 logger = get_logger("data_provider")
 
+CACHE_DIR = "data/cache/klines/"
+CACHE_TTL_SECONDS = 86400  # 1 天
+
+
+class KLineCache:
+    """K线数据文件缓存 (Parquet 格式)"""
+
+    def __init__(self, cache_dir: str = CACHE_DIR, ttl: int = CACHE_TTL_SECONDS):
+        self._dir = cache_dir
+        self._ttl = ttl
+        os.makedirs(cache_dir, exist_ok=True)
+
+    def _cache_key(self, stock_code: str, start: str, end: str, period: str) -> str:
+        code = stock_code.replace(".", "_")
+        return f"{code}_{start}_{end}_{period}.parquet"
+
+    def get(self, stock_code: str, start: str, end: str, period: str) -> Optional[pd.DataFrame]:
+        path = os.path.join(self._dir, self._cache_key(stock_code, start, end, period))
+        if not os.path.exists(path):
+            return None
+        if time.time() - os.path.getmtime(path) > self._ttl:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            return None
+        try:
+            df = pd.read_parquet(path)
+            logger.debug(f"File cache hit: {stock_code} ({start}-{end}) period={period}")
+            return df
+        except Exception:
+            return None
+
+    def set(self, stock_code: str, start: str, end: str, period: str, df: pd.DataFrame):
+        path = os.path.join(self._dir, self._cache_key(stock_code, start, end, period))
+        try:
+            df.to_parquet(path, index=False)
+        except Exception as e:
+            logger.warning(f"Failed to write file cache: {e}")
+
+    def cleanup(self, max_age_hours: int = 168):
+        cutoff = time.time() - max_age_hours * 3600
+        count = 0
+        for f in os.listdir(self._dir):
+            fp = os.path.join(self._dir, f)
+            if os.path.isfile(fp) and os.path.getmtime(fp) < cutoff:
+                try:
+                    os.remove(fp)
+                    count += 1
+                except OSError:
+                    pass
+        if count:
+            logger.info(f"Cache cleanup: removed {count} files older than {max_age_hours}h")
+
+    @property
+    def file_count(self) -> int:
+        return len([f for f in os.listdir(self._dir) if os.path.isfile(os.path.join(self._dir, f))])
+
+
+_file_cache = KLineCache()
+
 
 class DataProvider:
     """历史数据提供器"""
@@ -22,6 +87,7 @@ class DataProvider:
     def __init__(self, prefer: str = "xtquant"):
         self._prefer = prefer
         self._cache: dict[str, pd.DataFrame] = {}
+        self._file_cache = _file_cache
 
     def get_kline(
         self,
@@ -49,11 +115,16 @@ class DataProvider:
         # 缓存检查
         cache_key = f"{stock_code}:{start_time}:{end_time}:{period}"
         if cache_key in self._cache:
-            logger.debug(f"Cache hit: {stock_code} ({start_time}-{end_time})")
+            logger.debug(f"Memory cache hit: {stock_code} ({start_time}-{end_time})")
             return self._cache[cache_key]
 
+        # 文件缓存检查
+        data = self._file_cache.get(stock_code, start_time, end_time, period)
+        if data is not None and len(data) > 0:
+            self._cache[cache_key] = data
+            return data
+
         # 优先 xtquant
-        data = None
         if self._prefer == "xtquant":
             data = self._from_xtquant(stock_code, start_time, end_time, fields, period)
 
@@ -69,6 +140,7 @@ class DataProvider:
 
         if data is not None and len(data) > 0:
             self._cache[cache_key] = data
+            self._file_cache.set(stock_code, start_time, end_time, period, data)
         return data
 
     def _from_xtquant(

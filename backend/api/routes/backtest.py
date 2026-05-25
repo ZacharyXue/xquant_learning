@@ -14,7 +14,7 @@ from backend.db.repository import (
     get_backtest_runs, create_backtest_run, save_backtest_result,
 )
 from backend.db.models import BacktestRun
-from backend.api.models import BacktestRequest, BacktestResultOut, ParamOptimizeRequest
+from backend.api.models import BacktestRequest, BacktestResultOut, ParamOptimizeRequest, AdvancedOptimizeRequest
 
 logger = get_logger("api.backtest")
 router = APIRouter()
@@ -260,6 +260,235 @@ async def run_optimize(body: ParamOptimizeRequest, db: AsyncSession = Depends(ge
     }
 
 
+def _dispatch_optimizer(body: AdvancedOptimizeRequest, tuning_space: list):
+    """根据优化方法创建对应的优化器实例"""
+    if body.method == "grid":
+        from backend.backtest.optimizers.grid_optimizer import GridOptimizer
+        return GridOptimizer(
+            strategy_name=body.strategy_name,
+            stock_code=body.stock_code,
+            start_date=body.start_date,
+            end_date=body.end_date,
+            tuning_space=tuning_space,
+            metric=body.metric,
+            n_trials=body.n_trials,
+            n_jobs=body.n_jobs,
+        )
+    elif body.method == "random":
+        from backend.backtest.optimizers.random_optimizer import RandomOptimizer
+        return RandomOptimizer(
+            strategy_name=body.strategy_name,
+            stock_code=body.stock_code,
+            start_date=body.start_date,
+            end_date=body.end_date,
+            tuning_space=tuning_space,
+            metric=body.metric,
+            n_trials=body.n_trials,
+            n_jobs=body.n_jobs,
+        )
+    else:  # default optuna
+        from backend.backtest.optimizers.optuna_optimizer import OptunaOptimizer
+        return OptunaOptimizer(
+            strategy_name=body.strategy_name,
+            stock_code=body.stock_code,
+            start_date=body.start_date,
+            end_date=body.end_date,
+            tuning_space=tuning_space,
+            metric=body.metric,
+            n_trials=body.n_trials,
+            n_jobs=body.n_jobs,
+        )
+
+
+def _run_advanced_optimize_sync(
+    run_id: int, body: AdvancedOptimizeRequest,
+):
+    """在独立线程中执行高级优化并持久化结果"""
+    from backend.engine.strategy_registry import get, create
+
+    try:
+        from src.strategies.bonus_stocks import BonusStocksStrategy  # noqa
+    except ImportError:
+        pass
+
+    cls = get(body.strategy_name)
+    if cls is None:
+        error = f"Strategy '{body.strategy_name}' not found"
+        logger.error(f"Advanced optimize [{run_id}]: {error}")
+        _mark_run_failed(run_id, error)
+        return
+
+    instance = create(body.strategy_name, {})
+    tuning_space = list(instance.get_tuning_space()) if hasattr(instance, 'get_tuning_space') else []
+
+    if body.param_overrides:
+        for p in tuning_space:
+            if p.name in body.param_overrides:
+                override = body.param_overrides[p.name]
+                if isinstance(override, (int, float)):
+                    p.low = min(override) if isinstance(override, list) else override
+                    p.high = max(override) if isinstance(override, list) else override
+                elif isinstance(override, list) and len(override) == 2:
+                    p.low, p.high = override
+
+    if body.validation == "walkforward":
+        from backend.backtest.walkforward import WalkForwardValidator
+        wf = WalkForwardValidator(
+            start_date=body.start_date,
+            end_date=body.end_date,
+            train_years=body.walkforward_train_years,
+            test_years=body.walkforward_test_years,
+        )
+        opt_cls = _get_optimizer_class(body.method)
+        wf_result = wf.validate(
+            strategy_name=body.strategy_name,
+            stock_code=body.stock_code,
+            optimizer_class=opt_cls,
+            tuning_space=tuning_space,
+            metric=body.metric,
+            n_trials=body.n_trials,
+            n_jobs=body.n_jobs,
+        )
+        _persist_advanced_result(run_id, wf_result)
+        return
+
+    optimizer = _dispatch_optimizer(body, tuning_space)
+    try:
+        results = optimizer.optimize()
+    except Exception as e:
+        logger.error(f"Advanced optimize [{run_id}] failed: {e}")
+        _mark_run_failed(run_id, str(e))
+        return
+
+    top10 = results[:10]
+    _persist_advanced_trials(run_id, top10, body.metric, len(results))
+
+
+def _get_optimizer_class(method: str):
+    if method == "grid":
+        from backend.backtest.optimizers.grid_optimizer import GridOptimizer
+        return GridOptimizer
+    elif method == "random":
+        from backend.backtest.optimizers.random_optimizer import RandomOptimizer
+        return RandomOptimizer
+    else:
+        from backend.backtest.optimizers.optuna_optimizer import OptunaOptimizer
+        return OptunaOptimizer
+
+
+def _mark_run_failed(run_id: int, error: str):
+    async def _mark():
+        from backend.db.database import get_session_factory
+        from backend.db.models import BacktestRun
+        from datetime import datetime
+        factory = get_session_factory()
+        async with factory() as db:
+            run = await db.get(BacktestRun, run_id)
+            if run:
+                run.status = "failed"
+                run.error_msg = str(error)[:500]
+                run.completed_at = datetime.now()
+                await db.commit()
+    try:
+        asyncio.run(_mark())
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_mark())
+        loop.close()
+
+
+def _persist_advanced_trials(run_id: int, results: list, metric: str, total_combos: int):
+    async def _persist():
+        from backend.db.database import get_session_factory
+        from backend.db.models import BacktestRun
+        from backend.db.repository import save_backtest_result
+        from datetime import datetime
+        factory = get_session_factory()
+        async with factory() as db:
+            run = await db.get(BacktestRun, run_id)
+            if run is None:
+                return
+            for r in results:
+                save_data = {**r.metrics, "total_trades": r.metrics.get("total_trades", 0)}
+                await save_backtest_result(db, run_id=run_id, result=save_data)
+            run.status = "completed"
+            run.completed_at = datetime.now()
+            run.params = {
+                "type": "optimization_advanced",
+                "method": "advanced",
+                "total_trials": total_combos,
+                "metric": metric,
+            }
+            await db.commit()
+    try:
+        asyncio.run(_persist())
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_persist())
+        loop.close()
+
+
+def _persist_advanced_result(run_id: int, wf_result: dict):
+    async def _persist():
+        from backend.db.database import get_session_factory
+        from backend.db.models import BacktestRun
+        from datetime import datetime
+        factory = get_session_factory()
+        async with factory() as db:
+            run = await db.get(BacktestRun, run_id)
+            if run is None:
+                return
+            run.status = "completed"
+            run.completed_at = datetime.now()
+            run.params = {
+                "type": "walkforward",
+                "summary": wf_result.get("summary", {}),
+            }
+            await db.commit()
+    try:
+        asyncio.run(_persist())
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_persist())
+        loop.close()
+
+
+@router.post("/optimize/advanced")
+async def advanced_optimize(body: AdvancedOptimizeRequest, db: AsyncSession = Depends(get_session)):
+    try:
+        start_dt = datetime.strptime(body.start_date, "%Y%m%d")
+        end_dt = datetime.strptime(body.end_date, "%Y%m%d")
+    except ValueError as e:
+        return {"status": "error", "error": f"Invalid date format (use YYYYMMDD): {e}"}
+
+    run = await create_backtest_run(
+        db,
+        strategy_name=body.strategy_name,
+        stock_code=body.stock_code,
+        start_date=start_dt,
+        end_date=end_dt,
+        params={"method": body.method, "metric": body.metric, "validation": body.validation},
+        status="running",
+    )
+    await db.commit()
+    run_id = run.id
+
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, _run_advanced_optimize_sync, run_id, body)
+
+    logger.info(
+        f"Advanced optimize started: id={run_id} strategy={body.strategy_name} "
+        f"method={body.method} validation={body.validation}"
+    )
+    return {
+        "status": "accepted",
+        "run_id": run_id,
+        "strategy": body.strategy_name,
+        "method": body.method,
+        "validation": body.validation,
+    }
+
+
 @router.get("/optimize/{run_id}")
 async def get_optimize_results(run_id: int, db: AsyncSession = Depends(get_session)):
     """获取参数优化结果 (Top 10 按 sharpe 排序)"""
@@ -282,6 +511,8 @@ async def get_optimize_results(run_id: int, db: AsyncSession = Depends(get_sessi
         "calmar_ratio": float(row.calmar_ratio or 0),
         "total_investment": float(row.total_investment or 0),
         "final_value": float(row.final_value or 0),
+        "xirr": float(row.xirr or 0),
+        "return_on_deployed": float(row.return_on_deployed or 0),
     } for row in rows]
 
 
@@ -312,12 +543,38 @@ async def get_result(run_id: int, db: AsyncSession = Depends(get_session)):
         win_rate=float(row.win_rate or 0),
         total_investment=float(row.total_investment or 0),
         final_value=float(row.final_value or 0),
+        total_return=float(row.total_return or 0),
         return_rate=float(row.return_rate or 0),
         annualized_return=float(row.annualized_return or 0),
         max_drawdown=float(row.max_drawdown or 0),
+        volatility=float(row.volatility or 0),
         sharpe_ratio=float(row.sharpe_ratio or 0),
         calmar_ratio=float(row.calmar_ratio or 0),
+        xirr=float(row.xirr or 0),
+        return_on_deployed=float(row.return_on_deployed or 0),
         equity_curve=row.equity_curve or [],
         buy_signals=row.buy_signals or [],
-        benchmark=row.benchmark or {},
+        trades=row.trades_json or [],
+        drawdown_curve=row.drawdown_curve or [],
+        monthly_returns=row.monthly_returns or [],
+        baseline=row.baseline or {},
     )
+
+
+@router.post("/cache/cleanup")
+async def cleanup_cache(max_age_hours: int = 168):
+    """清理过期的文件缓存"""
+    from backend.backtest.data_provider import _file_cache
+    _file_cache.cleanup(max_age_hours=max_age_hours)
+    return {"status": "ok", "remaining_files": _file_cache.file_count}
+
+
+@router.get("/cache/status")
+async def cache_status():
+    """获取文件缓存状态"""
+    from backend.backtest.data_provider import _file_cache
+    return {
+        "cache_dir": str(_file_cache._dir),
+        "file_count": _file_cache.file_count,
+        "ttl_hours": _file_cache._ttl / 3600,
+    }

@@ -165,7 +165,10 @@ async def create_backtest_run(db: AsyncSession, **kwargs) -> BacktestRun:
 
 
 async def save_backtest_result(db: AsyncSession, run_id: int, result: dict) -> BacktestResult:
-    res = BacktestResult(run_id=run_id, **result)
+    mapped = dict(result)
+    if "trades" in mapped and "trades_json" not in mapped:
+        mapped["trades_json"] = mapped.pop("trades")
+    res = BacktestResult(run_id=run_id, **mapped)
     db.add(res)
     await db.flush()
     return res

@@ -25,3 +25,4 @@ config/trade_config.yaml
 docker/pgdata/
 
 # Alembic
+data/cache/
