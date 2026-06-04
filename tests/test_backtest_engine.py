@@ -33,3 +33,17 @@ class TestWeekdayFromName:
 
     def test_whitespace(self):
         assert _weekday_from_name("  Wed  ") == 2
+
+
+class TestBacktestIntegration:
+    def test_backtest_bonus_stocks(self):
+        import strategies.bonus_stocks  # noqa: F401 — trigger @register
+        from backtest.engine import BacktestEngine
+        engine = BacktestEngine()
+        result = engine.run(
+            strategy_name="bonus_stocks", stock_code="510880.SH",
+            start_date="20220101", end_date="20221231",
+            params={"base_volume": 500, "investment_days": ["Wednesday"]},
+            initial_capital=100000, save_to_db=False)
+        assert "error" not in result, result.get("error")
+        assert result["total_trades"] >= 0
