@@ -1,0 +1,27 @@
+# xtquant quant trading system config
+database:
+  path: "data/xtquant.db"
+
+trade:
+  mode: sim                       # sim | real
+  qmt_path: ""
+  account_id: ""
+  max_position_per_stock: 10000
+  sim_initial_capital: 100000.0
+
+fee:
+  commission_rate: 0.00025       # 0.025%
+  stamp_tax_rate: 0.001          # 0.1% (sell only)
+  transfer_fee_rate: 0.00002     # 0.002%
+  min_commission: 5.0
+
+slippage:
+  rate: 0.001                    # 0.1%
+
+trading_hours:
+  start: "09:30"
+  end: "14:55"
+
+backtest:
+  cache_dir: "data/cache/klines"
+  cache_ttl: 86400

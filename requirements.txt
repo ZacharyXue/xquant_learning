@@ -1,35 +1,5 @@
-# === 核心依赖 ===
-fastapi>=0.115.0
-uvicorn>=0.34.0
-pydantic>=2.10.0
-
-# === gRPC ===
-grpcio>=1.76.0
-grpcio-tools>=1.76.0
-protobuf>=6.33.0
-
-# === 数据库 ===
-sqlalchemy>=2.0.0
-asyncpg>=0.30.0
-psycopg2-binary>=2.9.0
-alembic>=1.13.0
-
-# === 数据处理 ===
 numpy>=2.0.0
 pandas>=2.2.0
 pyyaml>=6.0.0
-python-dateutil>=2.9.0
-pytz>=2025.0
-
-# === 交易 (Windows only) ===
-# xtquant==250516.1.1  # 从 QMT 安装目录安装
-
-# === 行情备选 (跨平台) ===
-# akshare>=1.18.0  # 可选，跨平台时使用
-
-# === 可视化 ===
-matplotlib>=3.10.0
-
-# === 测试 ===
+tqdm>=4.0.0
 pytest>=9.0.0
-pytest-asyncio>=0.24.0
