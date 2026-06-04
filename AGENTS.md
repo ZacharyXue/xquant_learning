@@ -1,226 +1,168 @@
 # AGENTS.md
 
-## 本文档目的
+AI programming assistant (opencode) work guide. Contains local environment paths, common commands, and code conventions.
 
-本文档是 **AI 编程助手（opencode）** 在本项目中的工作指南。包含本地环境路径、常用命令和代码规范——这些是每次对话都必须加载的核心信息。
-
-> 架构设计、数据库表结构、费率模型等详细内容见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
-> 项目概述和功能列表见 [README.md](README.md)。
+> Interface documentation: [docs/API_REFERENCE.md](docs/API_REFERENCE.md)
 
 ---
 
-## 本地开发环境
+## CRITICAL
 
-AI 助手生成命令时**必须使用以下实际路径**，禁止用占位符。
+**AI MUST read `docs/API_REFERENCE.md` before executing any trade, backtest, or data query task.**
+Interface changes **MUST** synchronize updates to `docs/API_REFERENCE.md`.
 
-### Python 环境
+---
 
-| 项目 | 值 |
-|------|-----|
-| Python 版本 | 3.11.9 (64-bit) |
-| Python 路径 | `F:\Codes\Python311-64\python.exe` |
-| 虚拟环境 | `F:\Codes\xtquant_learning\.venv` |
-| 虚拟环境 Python | `.venv\Scripts\python.exe` |
-| 激活命令 | `.venv\Scripts\Activate.ps1` |
+## Local Development Environment
 
-#### WSL2 调试说明
+### Python
 
-本项目 Python 是 Windows 原生安装，但 **WSL2 可通过互操作直接调用 Windows 可执行文件**。调试时需将 Windows 路径转为 Linux 格式：
-
-| Windows 路径 | WSL2 路径 |
-|---|---|
-| `F:\Codes\xtquant_learning\` | `/mnt/f/Codes/xtquant_learning/` |
-| `.venv\Scripts\python.exe` | `/mnt/f/Codes/xtquant_learning/.venv/Scripts/python.exe` |
-| `D:\国金证券QMT交易端\` | `/mnt/d/国金证券QMT交易端/` |
-
-> **注意**：WSL2 能运行 .exe 文件，但部分依赖 Linux 原生 .so 的包（如 asyncpg 的 C 扩展）会失败，需安装 Windows wheel。
+| Item | Value |
+|------|-------|
+| Python version | 3.11.9 (64-bit) |
+| Python path | `F:\Codes\Python311-64\python.exe` |
+| Virtual env | `F:\Codes\xtquant_learning\.venv` |
+| Virtual env Python | `.venv\Scripts\python.exe` |
+| Activate command | `.venv\Scripts\Activate.ps1` |
 
 ### QMT / xtquant
 
-| 项目 | 值 |
-|------|-----|
-| QMT 安装路径 | `D:\国金证券QMT交易端` |
-| xtquant SDK 路径 | `D:\国金证券QMT交易端\bin.x64\Lib\site-packages\xtquant` |
-| xtquant .pth 文件 | `.venv\Lib\site-packages\xtquant.pth`（已配置 DLL 搜索路径） |
-| 券商 | 国金证券 |
-| 状态 | QMT 客户端运行中时可正常调用 xtdata / xttrader |
+| Item | Value |
+|------|-------|
+| QMT install path | `D:\国金证券QMT交易端` |
+| xtquant SDK path | `D:\国金证券QMT交易端\bin.x64\Lib\site-packages\xtquant` |
+| Broker | 国金证券 |
+| Status | xtdata/xttrader available when QMT client is running |
 
-### 数据库
+### Database
 
-| 项目 | 值 |
-|------|-----|
-| 类型 | PostgreSQL 16 |
-| 运行方式 | Docker Desktop (WSL2) |
-| 容器名 | `xtquant_postgres` |
-| 端口 | `5432` |
-| 用户名/密码 | `postgres` / `postgres` |
-| 数据库名 | `xtquant` |
-| 数据目录 | `docker\pgdata\`（绑定挂载，删除镜像不丢数据） |
-| 连接地址 | `postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/xtquant` |
-
-### Node.js / 前端
-
-| 项目 | 值 |
-|------|-----|
-| Node.js | v22.14.0 |
-| npm | 10.9.2 |
-| 前端目录 | `frontend\` |
-| 开发服务器 | `npm run dev`（端口 5173，API 代理到 8000） |
-| 构建命令 | `npm run build`（tsc + vite build） |
+| Item | Value |
+|------|-------|
+| Type | SQLite |
+| Path | `data/xtquant.db` |
+| Init | `python scripts/manage.py --init` |
 
 ---
 
-## 测试纪律
+## WSL2 Tips
 
-1. **API 优先测试**：优先使用 `Invoke-RestMethod` / `curl` 调用 API 接口验证功能，不启动无限等待的服务
-2. **并行验证**：多个独立 API 测试应并行发起请求，缩短验证时间
-3. **快速回收**：验证通过后立即 `Stop-Process` 杀死后端进程，继续后续流程
-4. **先修后测**：先完成代码修改，再统一启动服务验证，避免反复重启
+| Windows | WSL2 |
+|---------|------|
+| `F:\Codes\xtquant_learning\` | `/mnt/f/Codes/xtquant_learning/` |
+| `.venv\Scripts\python.exe` | `/mnt/f/Codes/xtquant_learning/.venv/Scripts/python.exe` |
 
 ---
 
-## 常用命令
+## Common Commands
 
-### 启动服务
-
-```powershell
-# 一键启动（Windows，自动检查 DB + 启动后端 + 启动前端）
-.\scripts\start.ps1
-
-# 仅启动后端（用于 API 测试验证）
-.venv\Scripts\python.exe -m backend.main
-
-# 仅启动前端
-.\scripts\start.ps1 --Frontend
-
-# 完整启动（Dashboard + Trade Engine，需要 QMT）
-.\scripts\start.ps1 --Full
-
-# 启动数据库（如未运行）
-docker compose -f docker/docker-compose.yml up -d postgres
-
-# 访问 Dashboard: http://localhost:5173
-# API 文档: http://localhost:8000/docs
-```
-
-### 开发命令
-
-```powershell
-# 运行 Python 脚本（务必使用 venv Python）
-.venv\Scripts\python.exe -c "<code>"
-
-# 安装依赖
-.venv\Scripts\python.exe -m pip install <package>
-
-# 重新生成 gRPC 代码（修改 trade.proto 后执行）
-.venv\Scripts\python.exe -m grpc_tools.protoc --proto_path=backend/grpc --python_out=backend/grpc --grpc_python_out=backend/grpc backend/grpc/trade.proto
-# 生成后需修复 import：将 trade_pb2_grpc.py 中的 "import trade_pb2" 改为 "from backend.grpc import trade_pb2"
-
-# 数据库迁移
-.venv\Scripts\python.exe -m alembic upgrade head
-.venv\Scripts\python.exe -m alembic revision --autogenerate -m "描述"
-
-# 运行测试 (需要 XTQUANT_TESTING=1 避免 QMT 路径冲突)
-$env:XTQUANT_TESTING="1"; .venv\Scripts\python.exe -m pytest tests/ -v --ignore=tests/units/test_bonus_stocks.py --ignore=tests/units/test_strategy_executor.py
-
-# 前端构建检查
-cd frontend; npm run build
-```
-
-### WSL2 调试命令
-
-在 WSL2 bash 中，将 Windows 路径转换为 Linux 格式即可调用：
+### Setup
 
 ```bash
-# Python 运行
-PY=/mnt/f/Codes/xtquant_learning/.venv/Scripts/python.exe
+# Install deps
+.venv/Scripts/python.exe -m pip install -r requirements.txt
 
-# 运行脚本
-$PY -c "print('hello')"
-
-# 安装依赖
-$PY -m pip install <package>
-
-# 启动后端
-$PY -m backend.main
-
-# 运行测试
-XTQUANT_TESTING=1 $PY -m pytest tests/ -v
-
-# 数据库迁移
-$PY -m alembic upgrade head
-$PY -m alembic revision --autogenerate -m "描述"
-
-# gRPC 代码生成
-$PY -m grpc_tools.protoc \
-  --proto_path=backend/grpc \
-  --python_out=backend/grpc \
-  --grpc_python_out=backend/grpc \
-  backend/grpc/trade.proto
+# Initialize database + register strategies
+.venv/Scripts/python.exe scripts/manage.py --init
 ```
 
-### 数据库操作
+### Strategy Management
 
 ```bash
-# 查看表结构
-docker exec xtquant_postgres psql -U postgres -d xtquant -c "\dt"
+.venv/Scripts/python.exe scripts/manage.py --list
+.venv/Scripts/python.exe scripts/manage.py --show bonus_stocks
+.venv/Scripts/python.exe scripts/manage.py --enable bonus_stocks
+.venv/Scripts/python.exe scripts/manage.py --set bonus_stocks --param base_volume=1000
+```
 
-# 进入 PostgreSQL shell
-docker exec -it xtquant_postgres psql -U postgres -d xtquant
+### Backtest
 
-# 重启数据库
-docker compose -f docker/docker-compose.yml restart postgres
+```bash
+.venv/Scripts/python.exe scripts/run_backtest.py --strategy bonus_stocks --start 20220101 --end 20241231
+.venv/Scripts/python.exe scripts/run_backtest.py --strategy bonus_stocks --start 20220101 --end 20241231 --optimize --target max_sharpe
+.venv/Scripts/python.exe scripts/run_backtest.py --list
+.venv/Scripts/python.exe scripts/run_backtest.py --show <run_id>
+```
+
+### Simulated Trading
+
+```bash
+.venv/Scripts/python.exe scripts/run_sim.py
+.venv/Scripts/python.exe scripts/run_sim.py --strategy bonus_stocks
+```
+
+### Real Trading (QMT required)
+
+```bash
+# Set env vars or config.yaml
+$env:XTQUANT_QMT_PATH="D:\国金证券QMT交易端\userdata_mini"
+$env:XTQUANT_ACCOUNT_ID="your_account_id"
+.venv/Scripts/python.exe scripts/run_real.py
+```
+
+### Trade Records
+
+```bash
+.venv/Scripts/python.exe scripts/show_trades.py --today
+.venv/Scripts/python.exe scripts/show_trades.py --strategy bonus_stocks --mode backtest
+```
+
+### Testing
+
+```bash
+# Full test suite
+$env:XTQUANT_TESTING="1"; .venv/Scripts/python.exe -m pytest tests/ -v
 ```
 
 ---
 
-## 代码规范
+## Code Conventions
 
-### 提交规则
-- **每完成一个特性或修复，立即 commit**，使用 conventional commits 格式
-- **禁止自动 push**，由开发者手动推送
-- 示例：`feat(phase3): trade execution layer` / `fix: frontend build TS errors`
+- Commit: conventional commits, do NOT auto-push
+- Python: snake_case / PascalCase / full type annotations
+- Logging: use `import logging; logger = logging.getLogger(__name__)`, no `print`
+- Config: from `config.yaml`, no hardcoding
+- Sensitive data: qmt_path / account_id via environment variables
 
-### Python 代码风格
-- 函数必须有 docstring（Google 风格，中文可接受）
-- 变量/函数: snake_case / 类: PascalCase / 异步优先 / 完整类型标注
-- 错误处理: 使用 `backend.core.exceptions` 中的自定义异常，禁止裸 `except`
-- 日志: 统一使用 `from backend.core.logging import get_logger`，禁止 `print`
-- 配置: 不硬编码，从 `config/app.yaml` 或数据库加载
-- 敏感信息: qmt_path / account_id 通过环境变量注入，不入库
+### Strategy Development
 
-### 策略开发规范
-新增策略必须：
-1. 继承 `StrategyBase`，实现 `async def on_quote(quote) -> Optional[Signal]`
-2. 使用 `@register` 装饰器注册
-3. 实现 `get_config_schema()` 返回 JSON Schema（供前端渲染配置表单）
-4. 所有参数可配置，不硬编码
+New strategies MUST:
+1. Subclass `StrategyBase`
+2. Use `@register` decorator
+3. Define `name`, `display_name`, `watched_stocks` class attributes
+4. Implement `on_quote(self, quote: Quote) -> Optional[Signal]`
+5. Implement `get_config_schema()` returning JSON Schema
+6. Implement `get_tuning_space()` for grid search support
+7. Place file in `strategies/` directory
 
 ```python
+from engine.strategy_base import StrategyBase, Quote, Signal
+from engine.strategy_registry import register
+
 @register
 class MyStrategy(StrategyBase):
     name = "my_strategy"
-    display_name = "我的策略"
+    display_name = "My Strategy"
+    watched_stocks = ["000001.SZ"]
 
-    async def on_quote(self, quote: Quote) -> Optional[Signal]:
+    def on_quote(self, quote: Quote) -> Optional[Signal]:
         ...
 
     def get_config_schema(self) -> dict:
         return {"type": "object", "properties": {...}}
+
+    def get_tuning_space(self) -> list[dict]:
+        return [{"name": "param", "type": "int", "min": 1, "max": 100, "step": 1}]
 ```
 
 ---
 
-## 技术栈摘要
+## Tech Stack
 
-| 层 | 技术 |
-|----|------|
-| 后端框架 | FastAPI + uvicorn |
-| ORM | SQLAlchemy 2.0 (async) + asyncpg |
-| 迁移 | Alembic |
-| gRPC | grpcio + protobuf |
-| 交易 SDK | xtquant (QMT) |
-| 前端 | React 18 + TypeScript + Ant Design 5 + Recharts |
-| 测试 | pytest + pytest-asyncio |
-
-> 详细架构、数据模型、费率定义等参见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+| Layer | Tech |
+|-------|------|
+| Language | Python 3.11 |
+| Data | numpy, pandas |
+| Persistence | SQLite (stdlib sqlite3) |
+| Config | pyyaml |
+| Trading SDK | xtquant (QMT, Windows only) |
+| Testing | pytest |
