@@ -3,9 +3,9 @@ database:
   path: "data/xtquant.db"
 
 trade:
-  mode: sim                       # sim | real
-  qmt_path: ""
-  account_id: ""
+  mode: real                       # sim | real
+  qmt_path: "D:/国金证券QMT交易端/userdata_mini"
+  account_id: "8884731549"
   max_position_per_stock: 10000
   sim_initial_capital: 100000.0
 

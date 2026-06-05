@@ -3,6 +3,7 @@
 AI programming assistant (opencode) work guide. Contains local environment paths, common commands, and code conventions.
 
 > Interface documentation: [docs/API_REFERENCE.md](docs/API_REFERENCE.md)
+> Troubleshooting log: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 
 ---
 
