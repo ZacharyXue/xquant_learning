@@ -70,36 +70,39 @@ class RealExecutor:
         self.fee_calc = FeeCalculator()
 
     async def initialize(self) -> bool:
-        """Connect to QMT following the correct SDK sequence."""
+        """Connect to QMT following xttrader.py SDK sequence (line 340, 343, 358, 379):
+          1. register_callback()  2. start()  3. connect()  4. subscribe(account)
+        """
         try:
             from xtquant.xttrader import XtQuantTrader
             from xtquant.xttype import StockAccount
-            from xtquant.xtconstant import ACCOUNT_TYPE_STOCK
         except ImportError:
             raise RuntimeError(
                 "xtquant not available. Real trading requires QMT SDK on Windows."
             )
 
-        # Step 1: Create trader
+        # xttrader.py:109  — XtQuantTrader(path, session_id)
         self._trader = XtQuantTrader(self._qmt_path, 0)
 
-        # Step 2: Register callback BEFORE start()
+        # xttrader.py:340 — register_callback BEFORE start()
         self._trader.register_callback(self._callback)
 
-        # Step 3: Start
+        # xttrader.py:343 — start()
         self._trader.start()
 
-        # Step 4: Connect
+        # xttrader.py:358 — connect(), returns 0 on success
         result = self._trader.connect()
         self._connected = result == 0
         if not self._connected:
             return False
 
-        # Step 5: Subscribe to account
-        acc = StockAccount(self._account_id, ACCOUNT_TYPE_STOCK)
+        # xttype.py:13 — StockAccount(account_id, account_type='STOCK'), defaults to STOCK
+        acc = StockAccount(self._account_id)
+
+        # xttrader.py:379 — subscribe(account)
         self._trader.subscribe(acc)
 
-        # Ensure xtdata.run() is active for quote callbacks
+        # xtdata.py:772 — start xtdata.run() in daemon thread for quote callbacks
         _ensure_xtdata_runtime()
 
         return True
@@ -116,36 +119,36 @@ class RealExecutor:
 
         acc = StockAccount(self._account_id)
 
-        # Map side string to xtconstant order type
+        # xtconstant.py:77-78 — STOCK_BUY=23, STOCK_SELL=24
         order_type = STOCK_BUY if side == "buy" else STOCK_SELL
 
-        # Calculate slippage-adjusted price
         slippage_price = self.fee_calc.calc_slippage_price(price, side) if price > 0 else 0
 
-        # Use FIX_PRICE (limit order, type=11) if price specified, otherwise market price (type=5)
-        price_type = FIX_PRICE if slippage_price > 0 else 5  # 5 = latest price
+        # xtconstant.py:119 — FIX_PRICE=11 (limit), 5=LATEST_PRICE (market-ish)
+        price_type = FIX_PRICE if slippage_price > 0 else 5
 
-        seq = self._trader.order_stock(
+        # xttrader.py:429 — order_stock returns order_id (>0 success, -1 failure)
+        order_id = self._trader.order_stock(
             account=acc,
             stock_code=stock_code,
-            order_type=order_type,
+            order_type=order_type,            # 23=buy, 24=sell
             order_volume=volume,
-            price_type=price_type,
+            price_type=price_type,            # 11=limit, 5=latest
             price=slippage_price if slippage_price > 0 else 0,
             strategy_name="xtquant_learning",
             order_remark="auto",
         )
 
-        error_msg = self._callback.last_error
+        error_msg = self._callback.last_error if order_id <= 0 else None
 
         return {
-            "executed": seq > 0,
-            "order_seq": seq,
+            "executed": order_id > 0,
+            "order_id": order_id,
             "stock_code": stock_code,
             "side": side,
             "volume": volume,
             "price": slippage_price if slippage_price > 0 else 0,
-            "error": error_msg if seq <= 0 else None,
+            "error": error_msg,
         }
 
     def get_account(self):

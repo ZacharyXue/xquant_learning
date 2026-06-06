@@ -187,30 +187,71 @@ xtdata.subscribe_whole_quote(list(stock_codes), callback=self._on_tick)
 
 ## 三、代码审计：对比 xtquant SDK 源码 (2026-06-06)
 
-### 审计来源
+### 审计方法
 
-- `ai4trade/XtQuant` — xtquant SDK 官方封装源码
-- `liqimore/quant-qmt-proxy` — 成熟的生产级 QMT 代理项目
+逐行读取 `.venv` 中 xtquant SDK 源码并对比当前实现：
+| SDK 文件 | 行数 | 作用 |
+|----------|------|------|
+| `xtconstant.py` | 196 | 常量定义（order_type, price_type, account_type, market_type, order_status） |
+| `xttype.py` | 361 | 数据结构（StockAccount, XtOrder, XtTrade, XtPosition, XtOrderError 等） |
+| `xttrader.py` | 1137 | 交易 SDK（XtQuantTrader, 连接/报单/撤单/回调） |
+| `xtdata.py` | 1522 | 行情 SDK（subscribe, get_kline, xtdata.run 等） |
+
+也参考了 `ai4trade/XtQuant` 和 `liqimore/quant-qmt-proxy` 的调用模式。
+
+### 已验证的 SDK 常量（xtconstant.py）
+
+| 常量 | 行号 | 值 | 说明 |
+|------|------|-----|------|
+| `STOCK_BUY` | 77 | 23 | 股票买入 |
+| `STOCK_SELL` | 78 | 24 | 股票卖出 |
+| `SECURITY_ACCOUNT` | 15 | 2 | 股票账户类型 |
+| `LATEST_PRICE` | 117 | 5 | 最新价 |
+| `FIX_PRICE` | 119 | 11 | 限价/指定价 |
+| `SH_MARKET` | 140 | 0 | 上海市场 |
+| `SZ_MARKET` | 142 | 1 | 深圳市场 |
+| `ORDER_SUCCEEDED` | 165 | 56 | 已成 |
+| `ORDER_JUNK` | 167 | 57 | 废单 |
+
+### 已验证的 SDK 函数签名
+
+**xttrader.py:**
+| 函数 | 行号 | 签名 |
+|------|------|------|
+| `register_callback` | 340 | `(self, callback: XtQuantTraderCallback)` |
+| `start` | 343 | `(self)` — init + start async_client, 创建线程池 |
+| `connect` | 358 | `(self) -> int` — 返回 0 表示成功 |
+| `subscribe` | 379 | `(self, account: StockAccount)` |
+| `order_stock` | 429 | `(self, account, stock_code, order_type, order_volume, price_type, price, strategy_name='', order_remark='') -> int` — 返回 `order_id`（>0 成功，-1 失败） |
+
+**xttype.py:**
+| 类/函数 | 行号 | 签名 |
+|---------|------|------|
+| `StockAccount.__init__` | 22 | `(self, account_id: str, account_type: str = 'STOCK')` — **默认即股票账户** |
+
+**xtdata.py:**
+| 函数 | 行号 | 签名 |
+|------|------|------|
+| `subscribe_whole_quote` | 747 | `(code_list, callback=None) -> int` — 回调格式: `{stock_code: {...fields...}}` |
+| `subscribe_quote` | 709 | `(stock_code, period='1d', start_time='', end_time='', count=0, callback=None) -> int` |
+| `unsubscribe_quote` | 763 | `(seq: int)` |
+| `run` | 772 | `()` — 阻塞线程接收行情回调，每 3s 检查连接 |
+| `get_full_tick` | 684 | `(code_list) -> dict` |
+
+---
 
 ### Bug #6: `order_type=0` — 下单类型参数错误
 
 **严重程度：Critical**
 
-**现象：** `trader.order_stock(..., order_type=0)` 传入无效值。
+**源码验证：** `xtconstant.py:77-78` 定义 `STOCK_BUY=23, STOCK_SELL=24`。`xttrader.py:429-459` 的 `order_stock` 直接传递 `order_type` 到 C++ 客户端，无默认值。传入 `0` 不是合法值。
 
-**根因：** xtquant SDK 中 `order_type` 必须使用 `xtconstant` 定义的常量：
-- `STOCK_BUY = 23`
-- `STOCK_SELL = 24`
-
-传入 `0` 不是合法值，订单会被 QMT 忽略或返回错误。
-
-**修复：** `real_executor.py` 中：
+**修复：**
 ```python
 from xtquant.xtconstant import STOCK_BUY, STOCK_SELL
 order_type = STOCK_BUY if side == "buy" else STOCK_SELL
 ```
-
-**文件：** `trade/real_executor.py:95-96`
+**文件：** `trade/real_executor.py:93`
 
 ---
 
@@ -218,17 +259,10 @@ order_type = STOCK_BUY if side == "buy" else STOCK_SELL
 
 **严重程度：Critical**
 
-**现象：** `subscribe_whole_quote` 注册了回调但从未被执行。
+**源码验证：** `xtdata.py:772-781` — `run()` 的注释为 `阻塞线程接收行情回调`。内部循环 `time.sleep(3)` + 检查连接状态。`quant-qmt-proxy` 在守护线程中启动 `xtdata.run()`。
 
-**根因：** xtquant SDK 要求调用 `xtdata.run()` 启动事件循环（阻塞循环），这样才能驱动回调执行。`quant-qmt-proxy` 在守护线程中调用 `xtdata.run()`，`ai4trade/XtQuant` 也有同样的 `run()` 函数。
-
-**修复：** 在 `quote_pump.py` 和 `real_executor.py` 中添加 `ensure_xtdata_runtime()`，在守护线程中启动 `xtdata.run()`：
-```python
-threading.Thread(target=xtdata.run, daemon=True).start()
-```
-幂等设计——整个进程只启动一次。
-
-**文件：** `trade/quote_pump.py:18-26`, `trade/real_executor.py:19-26`
+**修复：** 守护线程中启动 `xtdata.run()`，幂等设计。
+**文件：** `trade/real_executor.py:85`（`_ensure_xtdata_runtime`）
 
 ---
 
@@ -236,44 +270,18 @@ threading.Thread(target=xtdata.run, daemon=True).start()
 
 **严重程度：Critical**
 
-**现象：** 下单后无法获知订单是否成交、拒绝或部分成交。
+**源码验证：** `xttrader.py:340` — `register_callback` 在 `start()` 之前调用。回调接口见 `xttrader.py:24-103`（`XtQuantTraderCallback` 定义 9 个回调方法）。
 
-**根因：** `XtQuantTrader` 要求在 `start()` 之前调用 `register_callback(callback_instance)` 注册回调处理器。回调负责接收：
-- `on_stock_order` — 订单状态更新
-- `on_stock_trade` — 成交回报
-- `on_order_error` — 订单被拒
-- `on_cancel_error` — 撤单被拒
-
-两个参考项目均实现了完整的回调桥接。
-
-**修复：** 新增 `_TraderCallback` 类，在 `initialize()` 中按正确顺序调用：
-```
-1. register_callback(callback)
-2. start()
-3. connect()
-4. subscribe(account)
-```
-
-**文件：** `trade/real_executor.py:29-66`
+**修复：** 实现 `_TraderCallback` 类并注册。连接序列：`register_callback` → `start` → `connect` → `subscribe`。
+**文件：** `trade/real_executor.py:29-66, 75`
 
 ---
 
-### Bug #9: `StockAccount` 缺少 `account_type` 参数
+### Bug #9: ~~`StockAccount` 缺少 `account_type`~~ — **误报，单参数即可**
 
-**严重程度：Important**
+**源码验证：** `xttype.py:22` — `def __init__(self, account_id, account_type = 'STOCK')`，默认值 `'STOCK'` 即映射到 `SECURITY_ACCOUNT=2`。`StockAccount("8884731549")` 单参数调用完全正确。
 
-**现象：** 账户订阅可能不完整。
-
-**根因：** `StockAccount(account_id, account_type)` 需要两个参数，`account_type` 从 `xtconstant` 获取：
-- `ACCOUNT_TYPE_STOCK = 2` — 股票账户
-
-**修复：**
-```python
-from xtquant.xtconstant import ACCOUNT_TYPE_STOCK
-StockAccount(account_id, ACCOUNT_TYPE_STOCK)
-```
-
-**文件：** `trade/real_executor.py:89`
+**之前结论错误，已修正。**
 
 ---
 
@@ -281,19 +289,12 @@ StockAccount(account_id, ACCOUNT_TYPE_STOCK)
 
 **严重程度：Important**
 
-**现象：** `order_stock()` 缺少 `price_type` 参数（限价/市价/最新价等）。
-
-**根因：** xtquant SDK `order_stock()` 需要 `price_type` 参数指定价格类型：
-- `FIX_PRICE = 11` — 限价单
-- `LATEST_PRICE = 5` — 最新价（近似市价）
-- `MARKET_SH_CONVERT_5_CANCEL = 42` — 上海最优五档即时成交剩余撤销
+**源码验证：** `xttrader.py:429-434` — `order_stock` 的 `price_type` 参数无默认值，必须传入。`xtconstant.py:117-119` 定义 `LATEST_PRICE=5, FIX_PRICE=11`。
 
 **修复：**
 ```python
-from xtquant.xtconstant import FIX_PRICE
-price_type = FIX_PRICE if price > 0 else 5
+price_type = FIX_PRICE if price > 0 else 5  # 5=LATEST_PRICE
 ```
-
 **文件：** `trade/real_executor.py:99`
 
 ---
@@ -302,48 +303,55 @@ price_type = FIX_PRICE if price > 0 else 5
 
 **严重程度：Minor**
 
-**现象：** 无法取消订阅，资源泄漏。
+**源码验证：** `xtdata.py:747` — 返回 `int` 订阅序号。`xtdata.py:763` — `unsubscribe_quote(seq)` 需要此序号。
 
-**根因：** `subscribe_whole_quote` 返回 `seq` 序列号，需要保存以便后续调用 `unsubscribe_quote(seq)`。
-
-**修复：** `quote_pump.py` 保存 `self._sub_seq`，在 `stop()` 中调用 `xtdata.unsubscribe_quote(self._sub_seq)`。
-
-**文件：** `trade/quote_pump.py:81-87`
+**修复：** 保存 `self._sub_seq`，`stop()` 中调用 `unsubscribe_quote`。
+**文件：** `trade/quote_pump.py:35, 73-78`
 
 ---
 
-### xtquant SDK 正确调用链总结
+### Bug #12: `subscribe_whole_quote` 回调数据格式错误
+
+**严重程度：Critical**
+
+**源码验证：** `xtdata.py:747-760` — `subscribe_whole_quote` 的 `callback` 接收 `{stock_code1: data_dict1, stock_code2: data_dict2, ...}` 格式的 dict，其中 key 为股票代码，value 为包含 `lastPrice/open/high/low/lastClose/volume/amount` 的 dict。
+
+**错误代码：** `_on_tick` 中直接 `data.get("stockCode")`，把整个字典当成单股票行情，永远返回空字符串。
+
+**修复：** 遍历 `datas.items()` 逐个处理每只股票的行情。
+```python
+def _on_tick(self, datas: dict):
+    for code, data in datas.items():
+        lp = data.get("lastPrice", 0)
+        ...
+```
+
+**文件：** `trade/quote_pump.py:41`
+
+---
+
+### xtquant SDK 正确调用链（源码验证）
 
 **行情订阅：**
 ```
-ensure_xtdata_runtime()          # 守护线程中启动 xtdata.run()
-  ↓
-xtdata.subscribe_whole_quote([codes], callback=on_tick)
-  → 返回 seq → 保存用于 unsubscribe
-  ↓
-on_tick(data)  ← C++ 线程回调 (每个 tick)
-  ↓
-stop() → xtdata.unsubscribe_quote(seq)
+xtdata.py:772 → xtdata.run()          # 守护线程中启动（阻塞循环，每3s检查连接）
+xtdata.py:747 → subscribe_whole_quote([codes], callback)
+              → 回调: {stock_code: {lastPrice, open, ...}}
+              → 返回 seq → 保存
+xtdata.py:763 → unsubscribe_quote(seq)
 ```
 
 **交易下单：**
 ```
-trader = XtQuantTrader(qmt_path, session_id)
-trader.register_callback(callback)    # 必须在 start() 之前
-trader.start()
-trader.connect() == 0                # 返回 0 表示成功
-trader.subscribe(StockAccount(id, ACCOUNT_TYPE_STOCK))
-  ↓
-trader.order_stock(
-    account, stock_code,
-    order_type=STOCK_BUY|STOCK_SELL,  # 23 or 24
-    order_volume=shares,
-    price_type=FIX_PRICE|5,           # 11 or 5
-    price=price,
-    strategy_name="...",
-    order_remark="..."
-) → 返回 order_id (>0) 或 -1 (失败)
-  ↓
+xttrader.py:109 → XtQuantTrader(qmt_path, session_id)
+xttrader.py:340 → register_callback(callback)    # 必须在 start() 之前
+xttrader.py:343 → start()
+xttrader.py:358 → connect() == 0
+xttrader.py:379 → subscribe(StockAccount(account_id))
+               ↓
+xttrader.py:429 → order_stock(account, code, STOCK_BUY|SELL, volume, FIX_PRICE|5, price, ...)
+                → 返回 order_id (>0) 或 -1
+               ↓
 callback.on_stock_order(order)       # 状态更新
 callback.on_stock_trade(trade)       # 成交回报
 callback.on_order_error(error)       # 订单被拒
